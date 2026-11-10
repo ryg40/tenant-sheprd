@@ -1,0 +1,37 @@
+# Replaces crates.io's libsqlite3-sys 0.36, through [patch.crates-io] in the
+# workspace manifest, with libsqlite3-sys 0.38, the one the workspace's own
+# rusqlite links; see src/lib.rs.
+[package]
+edition.workspace      = true
+license.workspace      = true
+name                   = "libsqlite3-sys"
+publish.workspace      = true
+rust-version.workspace = true
+# The `0.36` Servo's rusqlite 0.38 asks for, so the patch applies.
+version = "0.36.0"
+
+[dependencies]
+libsqlite3-sys-upstream = { default-features = false, package = "libsqlite3-sys", version = "0.38.2" }
+
+# The features rusqlite 0.38 may ask for, each handed to 0.38 under its name.
+[features]
+buildtime_bindgen                  = ["libsqlite3-sys-upstream/buildtime_bindgen"]
+bundled                            = ["libsqlite3-sys-upstream/bundled"]
+bundled-sqlcipher                  = ["libsqlite3-sys-upstream/bundled-sqlcipher"]
+bundled-sqlcipher-vendored-openssl = ["libsqlite3-sys-upstream/bundled-sqlcipher-vendored-openssl"]
+bundled-windows                    = ["libsqlite3-sys-upstream/bundled-windows"]
+bundled_bindings                   = ["libsqlite3-sys-upstream/bundled_bindings"]
+column_metadata                    = ["libsqlite3-sys-upstream/column_metadata"]
+default                            = ["min_sqlite_version_3_34_1"]
+in_gecko                           = ["libsqlite3-sys-upstream/in_gecko"]
+loadable_extension                 = ["libsqlite3-sys-upstream/loadable_extension"]
+min_sqlite_version_3_34_1          = ["libsqlite3-sys-upstream/min_sqlite_version_3_34_1"]
+preupdate_hook                     = ["libsqlite3-sys-upstream/preupdate_hook"]
+session                            = ["libsqlite3-sys-upstream/session"]
+sqlcipher                          = ["libsqlite3-sys-upstream/sqlcipher"]
+unlock_notify                      = ["libsqlite3-sys-upstream/unlock_notify"]
+wasm32-wasi-vfs                    = ["libsqlite3-sys-upstream/wasm32-wasi-vfs"]
+with-asan                          = ["libsqlite3-sys-upstream/with-asan"]
+
+[lints]
+workspace = true

@@ -1,0 +1,428 @@
+default:
+    @just --list
+
+# Launch the bundle so macOS reads Sheprd's identity and privacy declarations.
+run *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ "$(uname -s)" != Darwin ]; then
+        # The app starts chats with the sheprd-acp, finds the automation
+        # daemon, starts Remote control with the sheprd-remote-control, and
+        # Bluetooth pairing and presence with the sheprd-nearby, all beside
+        # its own executable.
+        cargo build --locked --release -p sheprd-acp -p sheprd-automate -p sheprd-nearby -p sheprd-remote-control
+        exec cargo run --locked --release -p sheprd-gpui -- {{args}}
+    fi
+    {{just_executable()}} bundle release
+    # Open the bundle instead of executing its binary: macOS asks for Local
+    # Network access (Bonjour, SSH hosts on the LAN) only for an app it
+    # launched, and denies a binary started from a shell without asking.
+    # Output still reaches this terminal; Ctrl-C quits the app.
+    app="$PWD/target/release/Sheprd.app"
+    out=/dev/null
+    if [ -t 0 ]; then out=$(tty); fi
+    env_args=()
+    while IFS= read -r variable; do
+        env_args+=(--env "$variable")
+    done < <(env | grep -E '^(RUST_LOG|RUST_BACKTRACE|HERDR_[A-Z0-9_]*)=' || true)
+    trap 'pkill -f "^$app/Contents/MacOS/sheprd" || true' INT TERM
+    open -n -W --stdout "$out" --stderr "$out" ${env_args[@]+"${env_args[@]}"} "$app" --args {{args}}
+
+run-debug *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ "$(uname -s)" != Darwin ]; then
+        cargo build --locked -p sheprd-acp -p sheprd-automate -p sheprd-nearby -p sheprd-remote-control
+        exec cargo run --locked -p sheprd-gpui -- {{args}}
+    fi
+    {{just_executable()}} bundle debug
+    exec target/debug/Sheprd.app/Contents/MacOS/sheprd {{args}}
+
+format:
+    cargo fmt --all
+
+format-check:
+    cargo fmt --all -- --check
+
+# Every feature, then none: cloud providers are default features, and a build
+# without them must not keep code only they use.
+lint:
+    cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+    cargo clippy --locked --workspace --all-targets --no-default-features -- -D warnings
+
+test:
+    cargo test --locked --workspace
+    cargo test --locked --workspace --all-features
+
+# The same suites under cargo-nextest, a process per test (see .config/nextest.toml).
+# Doctests do not run here; `just test` remains the CI gate.
+nextest *args:
+    cargo nextest run --locked --workspace {{args}}
+    cargo nextest run --locked --workspace --all-features {{args}}
+
+# Explicit opt-in: launches and cleans up its own isolated daemon only.
+test-live binary:
+    HERDR_TEST_BINARY="{{binary}}" cargo test --locked -p sheprd-client --test live -- --ignored --nocapture
+
+# Explicit opt-in: runs its own herdr-core (Herdr 2) in a private home and
+# socket, and stops only that core.
+test-core binary:
+    HERDR_CORE_TEST_BINARY="{{binary}}" cargo test --locked -p sheprd-core-client live -- --ignored --nocapture
+
+# Download the pinned herdr-core release for `target` (macos-aarch64, ...),
+# check its checksum, and put the binary in `dir`.
+fetch-herdr-core target dir="target/herdr-core":
+    python3 scripts/release/fetch-herdr-core.py {{target}} {{dir}}
+
+# Opens a real native window; requires an active desktop. Uses an isolated daemon.
+test-gui binary:
+    HERDR_TEST_BINARY="{{binary}}" cargo test --locked -p sheprd-gpui --features integration-test --test live_gui -- --ignored --nocapture --test-threads=1
+
+# Explicit opt-in: reads the real code signature and Homebrew records of an
+# installed app. Never discovers an installation on its own.
+test-update bundle:
+    HERDR_TEST_BUNDLE="{{bundle}}" cargo test --locked -p sheprd-updater install::tests::signing::installed_bundle -- --ignored --nocapture
+    HERDR_TEST_BUNDLE="{{bundle}}" cargo test --locked -p sheprd-updater brew::tests::the_real_cask -- --ignored --nocapture
+
+# Really upgrades the installed app through Homebrew; restart it afterwards.
+test-brew-upgrade bundle expected:
+    HERDR_TEST_BUNDLE="{{bundle}}" HERDR_TEST_BREW_EXPECTED="{{expected}}" HERDR_TEST_BREW_UPGRADE=1 cargo test --locked -p sheprd-updater brew::tests::homebrew_really_installs -- --ignored --nocapture
+
+# Repeat the Linux suite under CPU pressure in a container, where scheduling
+# races reproduce that a fast machine hides. Needs Docker; nothing else.
+stress-linux iterations="30" cpus="0.5" filter="":
+    bash scripts/stress-linux.sh {{iterations}} {{cpus}} {{filter}}
+
+# Native font/glyph regression across repeated frames and sizes; no daemon needed.
+test-sidebar:
+    cargo test --locked -p sheprd-gpui --features integration-test --test live_gui native_sidebar -- --ignored --nocapture --test-threads=1
+
+# Native hover/scroll CPU scene budget in milliseconds, calibrated for this machine.
+test-perf budget="30":
+    cargo build --locked --release -p sheprd-gpui --features integration-test
+    HERDR_PERF_P95_MS="{{budget}}" target/release/sheprd --performance-test
+
+# Compare UI variants written as GPUI code in `file` (the built-in demo when
+# empty) in a native window. "Send to agent" types the notes into the calling
+# Herdr pane through the running Sheprd, else writes `feedback`; `capture` gets
+# a PNG of the window once it has drawn. Debug build, no daemon. The process
+# left running is the app itself, so its PID is the one to stop.
+# See .claude/skills/gpui-mockup.
+[positional-arguments]
+mockup file="" feedback="" capture="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    absolute() { case "$1" in ""|/*) printf '%s' "$1" ;; *) printf '%s/%s' {{quote(invocation_directory())}} "$1" ;; esac; }
+    file="$(absolute "$1")"
+    feedback="$(absolute "$2")"
+    capture="$(absolute "$3")"
+    HERDR_MOCKUP_FILE="$file" cargo build --locked -p sheprd-gpui --features mockup
+    args=(--mockup)
+    if [ -n "$feedback" ]; then args+=(--feedback "$feedback"); fi
+    if [ -n "$capture" ]; then args+=(--capture "$capture"); fi
+    exec target/debug/sheprd "${args[@]}"
+
+build-release:
+    cargo build --locked --release -p sheprd-gpui -p sheprd-acp -p sheprd-automate -p sheprd-remote-control
+
+# Compile and install the release executable into Cargo's bin directory.
+[unix]
+install:
+    cargo install --locked --force --path crates/sheprd-gpui --bin sheprd
+    cargo install --locked --force --path crates/sheprd-acp
+    cargo install --locked --force --path crates/sheprd-automate
+    cargo install --locked --force --path crates/sheprd-remote-control
+
+# Only installation bypasses the POSIX shell used by the other recipes.
+[windows]
+[extension(".cmd")]
+install:
+    #!cmd.exe /c
+    cargo install --locked --force --path crates/sheprd-gpui --bin sheprd || exit /b 1
+    cargo install --locked --force --path crates/sheprd-launcher || exit /b 1
+    cargo install --locked --force --path crates/sheprd-acp || exit /b 1
+    cargo install --locked --force --path crates/sheprd-automate || exit /b 1
+    cargo install --locked --force --path crates/sheprd-remote-control
+
+# Regenerate circular Linux artwork on any platform (Python standard library).
+icons-linux:
+    python3 scripts/generate-linux-icons.py
+
+# Regenerate the Windows executable icons and the installer's images (Python
+# standard library and rsvg-convert).
+icons-windows:
+    python3 scripts/generate-windows-icons.py
+    python3 scripts/generate-installer-images.py
+
+# Regenerate all checked-in artwork on macOS (requires brew install librsvg).
+icons: icons-linux icons-windows
+    swift scripts/generate-icons.swift
+
+# Validate committed platform artwork without invoking native image generators.
+check-artwork:
+    PYTHONDONTWRITEBYTECODE=1 python3 assets/icons/test_artwork.py
+
+# Local, unsigned bundle with the automation daemon's binary beside the app.
+# Never installs or starts a daemon.
+bundle profile="release" features="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    test "$(uname -s)" = Darwin
+    case "{{profile}}" in
+        release) flags=--release ;;
+        debug) flags= ;;
+        *) echo "Unknown profile: {{profile}} (release or debug)" >&2; exit 2 ;;
+    esac
+    app=target/{{profile}}/Sheprd.app
+    cargo build --locked $flags --target-dir target -p sheprd-gpui --features "{{features}}"
+    cargo build --locked $flags --target-dir target -p sheprd-acp -p sheprd-automate -p sheprd-remote-control
+    mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
+    # Replace the executables rather than rewrite them in place: macOS keeps
+    # a signed file's old signature with its inode, so reading the rewritten
+    # pages kills the reader, and a chat still running the old sheprd-acp
+    # keeps its own copy.
+    rm -f "$app/Contents/MacOS/sheprd" "$app/Contents/MacOS/sheprd-acp" "$app/Contents/MacOS/sheprd-automate" "$app/Contents/MacOS/sheprd-remote-control" "$app/Contents/MacOS/sheprd-nearby"
+    cp target/{{profile}}/sheprd "$app/Contents/MacOS/sheprd"
+    # The automation daemon, found beside the app's executable.
+    cp target/{{profile}}/sheprd-automate "$app/Contents/MacOS/sheprd-automate"
+    codesign --force --sign - "$app/Contents/MacOS/sheprd-automate"
+    # Chats the app starts run the sheprd-acp beside its executable.
+    cp target/{{profile}}/sheprd-acp "$app/Contents/MacOS/sheprd-acp"
+    # Remote control runs the sheprd-remote-control beside it as a user service.
+    cp target/{{profile}}/sheprd-remote-control "$app/Contents/MacOS/sheprd-remote-control"
+    # Bluetooth pairing and presence run the Swift helper beside it; without
+    # it the app pairs over the network only.
+    xcrun swiftc -O -swift-version 6 macos/sheprd-nearby/main.swift macos/sheprd-nearby/Framing.swift \
+        macos/sheprd-nearby/Bonjour.swift -o "$app/Contents/MacOS/sheprd-nearby"
+    # Herdr 2 terminals run in the pinned herdr-core beside it, as releases
+    # bundle it. Fetched once per profile; an offline build goes on without.
+    core=target/{{profile}}/herdr-core
+    if [ ! -f "$core" ]; then
+        python3 scripts/release/fetch-herdr-core.py "$(rustc -vV | sed -n 's/^host: //p')" target/{{profile}} >/dev/null \
+            || echo "warning: no herdr-core bundled; Herdr 2 terminals need one on PATH" >&2
+    fi
+    rm -f "$app/Contents/MacOS/herdr-core"
+    if [ -f "$core" ]; then
+        cp "$core" "$app/Contents/MacOS/herdr-core"
+        codesign --force --sign - "$app/Contents/MacOS/herdr-core"
+    fi
+    for helper in acp automate remote-control nearby; do
+        rm -f "$app/Contents/MacOS/herdr-$helper"
+        cp "$app/Contents/MacOS/sheprd-$helper" "$app/Contents/MacOS/herdr-$helper"
+    done
+    cp assets/macos/Info.plist "$app/Contents/Info.plist"
+    for lproj in assets/macos/*.lproj; do
+        if [[ -d "$lproj" ]]; then cp -R "$lproj" "$app/Contents/Resources/"; fi
+    done
+    # LaunchServices and the Dock cache icons by bundle ID, so every worktree
+    # build sharing the release ID competed with the installed app's icon.
+    plutil -replace CFBundleIdentifier -string so.pen.herdr-gpui.dev "$app/Contents/Info.plist"
+    icons=$(python3 scripts/release/build-icon.py macos "$app/Contents/MacOS/sheprd")
+    cp "${icons%$'\n'*}" "$app/Contents/Resources/Sheprd.icns"
+    cp "${icons##*$'\n'}" "$app/Contents/Resources/Assets.car"
+    plutil -lint "$app/Contents/Info.plist"
+    # The linker's ad-hoc signature names the bare executable and binds no
+    # Info.plist, so services that trust the bundle ID refuse the app:
+    # notification authorization fails without a prompt. Ad-hoc sign the
+    # assembled bundle so its identity is so.pen.herdr-gpui.dev.
+    codesign --force --sign - "$app"
+
+# Link the actual optimized application and exercise its CLI without a desktop.
+test-build: build-release
+    cargo test --locked --release -p sheprd-gpui --test cli
+
+# Fail on source files over 1,000 lines.
+check-file-size:
+    bash scripts/check-file-size.sh
+
+# Fail when a `keep-sorted start`/`end` region is out of order.
+check-sorted:
+    python3 scripts/test_check_sorted.py
+    python3 scripts/check-sorted.py
+
+# Fail when a Fluent message does not parse, repeats, or is unused, or an
+# `fl!` names none (docs/i18n.md).
+check-i18n:
+    PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_check_i18n.py
+    python3 scripts/check-i18n.py
+
+# Sort every `keep-sorted start`/`end` region in place.
+sort:
+    python3 scripts/check-sorted.py --fix
+
+# Compile the remote control web app's stylesheet (commit the result) with
+# the Tailwind standalone CLI v4, so building the crate needs no Node.
+web-css:
+    tailwindcss --input crates/sheprd-remote-control/src/web/assets/input.css --output crates/sheprd-remote-control/src/web/assets/app.css --minify
+
+# The iOS app (ios/README.md). Not part of `ci`, which runs on Linux too;
+# the iOS workflow runs these on macOS.
+ios-generate:
+    cd ios && xcodegen -q
+    python3 ios/tools/test_branding.py
+
+# Swift package tests, against the fixtures the daemon's Rust tests write.
+ios-test:
+    PYTHONDONTWRITEBYTECODE=1 python3 ios/tools/test_testflight_notes.py
+    PYTHONDONTWRITEBYTECODE=1 python3 ios/tools/test_signing.py
+    cd ios/SheprdRemoteCore && swift test
+
+# Unsigned build of the app and its extensions for the simulator.
+ios-build: ios-generate
+    cd ios && xcodebuild -project SheprdRemote.xcodeproj -scheme SheprdRemote -destination 'generic/platform=iOS Simulator' -derivedDataPath build CODE_SIGNING_ALLOWED=NO -quiet build
+
+# Archive and upload to TestFlight, taking the key from `pass` when unset.
+ios-testflight:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # CI sets these from the `testflight` environment's secrets; here what
+    # the environment leaves unset comes from `pass`. The key ID and team
+    # are not secret.
+    export APPLE_TEAM_ID="${APPLE_TEAM_ID:-VJAHQVZ96V}"
+    export ASC_KEY_ID="${ASC_KEY_ID:-VACF2WK94S}"
+    if [ -z "${ASC_ISSUER_ID:-}" ] || [ -z "${ASC_KEY_P8:-}" ]; then
+        echo "Reading the App Store Connect key from pass: tap your YubiKey if it asks."
+    fi
+    if [ -z "${ASC_ISSUER_ID:-}" ]; then
+        ASC_ISSUER_ID=$(pass show apple/app-store-connect-issuer-id | head -1)
+        export ASC_ISSUER_ID
+    fi
+    if [ -z "${ASC_KEY_P8:-}" ]; then
+        ASC_KEY_P8=$(pass show "herdr-gpui/apple-api-key-$ASC_KEY_ID")
+        export ASC_KEY_P8
+    fi
+    echo "Credentials ready (key $ASC_KEY_ID, team $APPLE_TEAM_ID)."
+    sh ios/tools/testflight.sh
+
+# Render the native screen mockups in a headless simulator.
+ios-mockups appearance="dark" round="2":
+    ios/Mockups/render.sh {{appearance}} {{round}}
+
+test-mockup-wait:
+    python3 .claude/skills/gpui-mockup/scripts/test_wait.py
+
+test-pr-closure:
+    PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_close_low_confidence_prs.py
+
+# Tests of the portable snapshot tooling, in temporary repositories without network.
+test-portable:
+    PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/portable/tests
+
+# Check the publish set of HEAD and scan it for host values and secrets
+# (docs/portable-release.md). Reads Git objects only; needs the local deny list.
+portable-check: test-portable
+    python3 scripts/portable/publish_check.py
+    python3 scripts/portable/scan.py publish-set HEAD
+
+# Build the sanitized snapshot of HEAD on the local `portable` branch and print
+# the push plan. Pushes nothing without `--push`, which the owner approves first.
+portable-snapshot *args:
+    python3 scripts/portable/publish_portable.py {{args}}
+
+ci: format-check check-file-size check-sorted check-i18n check-artwork lint test test-mockup-wait test-pr-closure test-portable
+
+# Tools are listed in scripts/setup-ci.sh; Docker for lint-linux is only checked.
+# Install the tools local CI-equivalent runs need, on macOS or Ubuntu.
+setup-ci:
+    bash scripts/setup-ci.sh
+
+# Cross type-check the Windows target without a Windows machine. CI lints the
+# MSVC target on a Windows runner; this uses the GNU target because a Mac or
+# Linux host cannot supply the MSVC C toolchain some dependencies build against.
+# Needs `rustup target add x86_64-pc-windows-gnu` and mingw-w64
+# (`brew install mingw-w64`, or `apt install gcc-mingw-w64-x86-64`).
+lint-windows:
+    CC_x86_64_pc_windows_gnu=x86_64-w64-mingw32-gcc \
+    AR_x86_64_pc_windows_gnu=x86_64-w64-mingw32-ar \
+    cargo clippy --locked --workspace --all-targets --all-features \
+        --target x86_64-pc-windows-gnu -- -D warnings
+    CC_x86_64_pc_windows_gnu=x86_64-w64-mingw32-gcc \
+    AR_x86_64_pc_windows_gnu=x86_64-w64-mingw32-ar \
+    cargo clippy --locked --workspace --all-targets --no-default-features \
+        --target x86_64-pc-windows-gnu -- -D warnings
+
+# Clippy for Linux in the Ubuntu 24.04 that CI uses, from any host with Docker.
+# A cfg gate that is wrong only on Linux is invisible from macOS, and
+# lint-windows only covers Windows. The container runs the host architecture;
+# pass a platform, for example linux/amd64 on Apple Silicon, for the other one.
+lint-linux platform="":
+    bash scripts/lint-linux.sh {{platform}}
+
+# Audit the GitHub workflows for injection, over-broad permissions, and unpinned actions.
+audit-workflows:
+    zizmor .github/
+
+# License, advisory, and source checks over the dependency graph.
+audit-deps:
+    cargo deny check
+
+# Sign published release artifacts with the local GPG key (YubiKey). Not a CI step.
+sign-release *args:
+    ./scripts/gpg-sign-release.sh {{args}}
+
+# Verify published checksums, Sigstore and provenance; optional local GPG approval.
+verify-release *args:
+    ./scripts/verify-release.sh {{args}}
+
+# Check commit subjects the way CI does; the changelog is generated from them.
+check-commits base="origin/main":
+    python3 scripts/release/check-commit-messages.py range "{{base}}..HEAD"
+
+# Install the hooks, and the merge settings that cut repeated conflict work,
+# for this checkout and every worktree of it.
+hooks:
+    git config core.hooksPath .githooks
+    git config rerere.enabled true
+    git config rerere.autoupdate true
+    git config merge.cargo-lock.name "Cargo.lock: keep one side, then rebuild with Cargo"
+    git config merge.cargo-lock.driver "bash scripts/git/merge-cargo-lock.sh %O %A %B"
+    @echo "Hooks, rerere, and the Cargo.lock merge driver are configured."
+
+# What changed since the last release tag, straight from git history.
+changelog-unreleased:
+    git-cliff --config cliff.toml --unreleased
+
+# The whole generated changelog; it is never tracked in git.
+changelog:
+    git-cliff --config cliff.toml
+
+# Exactly what a release would publish: CHANGELOG.md and RELEASE_NOTES.md.
+# Windows counts as signed once WINDOWS_SIGNING_SUBJECT is set, as in
+# release.yml; set WINDOWS_SIGNED=true or false to preview either without gh.
+changelog-release version output:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ -z ${WINDOWS_SIGNED:-} ]]; then
+        if [[ -n $(gh variable get WINDOWS_SIGNING_SUBJECT --repo sheprd-labs/sheprd 2>/dev/null) ]]; then
+            WINDOWS_SIGNED=true
+        else
+            WINDOWS_SIGNED=false
+        fi
+    fi
+    WINDOWS_SIGNED=$WINDOWS_SIGNED bash scripts/release/generate-changelog.sh "{{version}}" "{{output}}"
+
+# Owner-only remote release; CI derives the YYYYMMDD.COUNTER version itself.
+release:
+    bash scripts/release/dispatch.sh
+
+# Owner-only beta: a GitHub prerelease that only `[updates] channel = "beta"`
+# installs see, kept out of Homebrew until promoted.
+release-beta:
+    bash scripts/release/dispatch.sh --beta
+
+# Owner-only: make a published beta the latest stable release, then update Homebrew.
+release-promote version:
+    bash scripts/release/dispatch.sh --promote "{{version}}"
+
+# Local universal signed/notarized DMG; does not publish anything.
+dmg $VERSION:
+    bash scripts/release/build-macos.sh "$VERSION"
+
+# Static checks and mocked release tests; does not dispatch or publish anything.
+release-check:
+    for script in scripts/*.sh scripts/release/*.sh; do bash -n "$script" || exit; done
+    PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/release/tests -v
+    PYTHONDONTWRITEBYTECODE=1 python3 scripts/release/test-release-security.py
+    actionlint .github/workflows/*.yml
+    zizmor .github/
+    git diff --check

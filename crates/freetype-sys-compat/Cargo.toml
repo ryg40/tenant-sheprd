@@ -1,0 +1,20 @@
+# Replaces crates.io's freetype-sys 0.20, through [patch.crates-io] in the
+# workspace manifest, with freetype-sys 0.23, the one Servo links; see
+# src/lib.rs.
+[package]
+edition.workspace      = true
+license.workspace      = true
+name                   = "freetype-sys"
+publish.workspace      = true
+rust-version.workspace = true
+# The `0.20` zed-font-kit asks for, so the patch applies.
+version = "0.20.1"
+
+# Where zed-font-kit asks for FreeType, and nowhere else: freetype-sys 0.23
+# fails to build without a FreeType that pkg-config finds, which a Windows
+# or macOS build of the workspace does not have and does not need.
+[target.'cfg(not(any(target_os = "macos", windows)))'.dependencies]
+freetype-sys-upstream = { package = "freetype-sys", version = "0.23.0" }
+
+[lints]
+workspace = true

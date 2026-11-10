@@ -1,0 +1,40 @@
+# Generic rules of scripts/portable/scan.py: private network addresses and secret forms.
+#
+# Format: one rule for each line, two fields separated by one blank:
+#   <name> <regex>
+# <name>   letters, digits and "-". It is the rule id of a finding.
+# <regex>  Python `re` syntax on bytes, no blank. Group 1 is the value of the finding;
+#          a rule without a group gives the whole match.
+# A line that starts with "#" is a comment. This file holds no address and no secret.
+#
+# IPv4: the character before the address must not be a letter, a digit, "_" or ".",
+# and the two characters before it must not be a version operator ("==", ">=", "<=",
+# "~=", "!="). The character after the address must not be a digit, or "." followed by
+# a digit. So a package pin and a part of a longer number give no finding. An address
+# in a range, in a URL, in angle brackets, after ":", "-", "+" or "~", or before a
+# suffix gives one.
+#
+# The documentation ranges (192.0.2/24, 198.51.100/24, 203.0.113/24, 2001:db8/32) and
+# loopback addresses are not private ranges: no rule.
+# A documentation example inside a private range goes into host-values.allow by value.
+
+# 10/8
+private-10 (?<![0-9A-Za-z_.])(?<![=<>~!]=)(10\.(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9]))(?![0-9])(?!\.[0-9])
+# 172.16/12
+private-172 (?<![0-9A-Za-z_.])(?<![=<>~!]=)(172\.(?:1[6-9]|2[0-9]|3[01])\.(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9]))(?![0-9])(?!\.[0-9])
+# 192.168/16
+private-192 (?<![0-9A-Za-z_.])(?<![=<>~!]=)(192\.168\.(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9]))(?![0-9])(?!\.[0-9])
+# 100.64/10 (shared address space, carrier-grade NAT, Tailscale)
+shared-100 (?<![0-9A-Za-z_.])(?<![=<>~!]=)(100\.(?:6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9]))(?![0-9])(?!\.[0-9])
+# IPv6 unique local addresses (prefix fc00 with length 7)
+private-ula (?i)(?<![0-9A-Za-z_.:-])(f[cd][0-9a-f]{2}:(?:[0-9a-f]{1,4}:|:)[0-9a-f:]*)
+
+# Secret forms. A test fixture that only looks like a secret goes into host-values.allow-lines.
+secret-private-key -----BEGIN[ ](?:[A-Z]+[ ])*PRIVATE[ ]KEY-----
+secret-github-token (?<![A-Za-z0-9_])(gh[pousr]_[A-Za-z0-9]{36,})
+secret-github-pat (?<![A-Za-z0-9_])(github_pat_[A-Za-z0-9_]{40,})
+secret-aws-key-id (?<![A-Za-z0-9])((?:AKIA|ASIA)[0-9A-Z]{16})(?![0-9A-Z])
+secret-slack-token (?<![A-Za-z0-9])(xox[abprs]-[A-Za-z0-9-]{20,})
+secret-api-key (?<![A-Za-z0-9_-])(sk-(?:ant-|proj-|or-)?[A-Za-z0-9_-]{32,})
+secret-google-key (?<![A-Za-z0-9_-])(AIza[0-9A-Za-z_-]{35})(?![0-9A-Za-z_-])
+secret-jwt (?<![A-Za-z0-9_-])(eyJ[A-Za-z0-9_-]{16,}\.eyJ[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,})

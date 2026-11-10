@@ -1,0 +1,74 @@
+# Values that are no finding of a generic rule of host-values.regex.
+#
+# Format: <rule> <value>, one pair for each line, the value exactly as it is in the file.
+# A line that starts with "#" is a comment.
+# Add a value only when it is a documentation example, a test fixture or a protocol
+# constant, never an address of a real host of the publisher. This list drops no finding
+# of the local deny list, so an address of the publisher's network stays a finding.
+#
+# Each value below is an example or a test fixture of upstream Sheprd: addresses of
+# remote control, device discovery and SSH tests, the CGNAT and Tailscale ranges
+# themselves, and mockup text. Commits of the upstream authors added them, and upstream
+# publishes them.
+
+private-10 10.0.0.0
+private-10 10.0.0.2
+private-10 10.0.0.4
+private-10 10.0.0.5
+private-10 10.0.0.7
+private-10 10.0.0.9
+private-10 10.0.0.19
+private-10 10.0.0.20
+private-10 10.0.0.21
+private-10 10.0.0.250
+private-10 10.1.2.3
+private-10 10.9.8.7
+private-10 10.9.9.9
+private-10 10.16.4.184
+private-172 172.20.0.3
+private-192 192.168.1.2
+private-192 192.168.1.4
+private-192 192.168.1.5
+private-192 192.168.1.9
+private-192 192.168.1.10
+private-192 192.168.1.20
+private-192 192.168.1.21
+private-192 192.168.1.31
+private-192 192.168.1.50
+private-192 192.168.2.2
+private-192 192.168.7.5
+private-192 192.168.7.9
+private-192 192.168.139.3
+private-ula fc00::
+private-ula fd00::2
+private-ula fd7a:115c:a1e0:ab12::1
+private-ula fd7a:115c:a1e0:abcd:1234:5678:90ab:
+private-ula fd7a:115c:a1e0::
+private-ula fd7a:115c:a1e0::1
+private-ula fd7a:115c:a1e0::3
+private-ula fd7a:115c:a1e0::d801:3b74
+private-ula fd7a:115c:a1e1::1
+private-ula fd7a:115c::1
+private-ula fd7a:115c::3
+private-ula fd7a::1
+private-ula fd7a::3
+private-ula fd07:b51a:cc66::1
+private-ula fd12:3456::9
+private-ula fd12::7
+shared-100 100.64.0.0
+shared-100 100.64.0.1
+shared-100 100.64.0.2
+shared-100 100.64.0.3
+shared-100 100.64.0.5
+shared-100 100.64.0.7
+shared-100 100.64.0.9
+shared-100 100.64.0.10
+shared-100 100.64.1.2
+shared-100 100.66.16.24
+shared-100 100.84.59.116
+shared-100 100.88.4.2
+shared-100 100.101.102.103
+shared-100 100.104.39.61
+shared-100 100.107.29.93
+shared-100 100.127.255.1
+shared-100 100.127.255.255

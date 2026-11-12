@@ -8,8 +8,10 @@
 //! listed only once GitHub reports them on for one, Automations the
 //! `herdr-automate` scripts and runs of every host (`crate::automations`),
 //! Ports every TCP port this computer's user listens on
-//! (`crate::local_ports`), and Usage the plan limits of every host
-//! (`crate::usage::section`).
+//! (`crate::local_ports`), Usage the plan limits of every host
+//! (`crate::usage::section`), and Walkr (`crate::walkr`), listed last and
+//! only while a run exists (live, or ended with its page kept), this
+//! computer has a saved Compare session, or `walkr.url` is set.
 //! `[sidebar] activity_bar = false` turns the bar off, and `[sidebar]
 //! automations = false` leaves Automations off it. With the bar on, the
 //! sidebar toggle sits at the end of the Workspaces title, and collapsing the
@@ -53,11 +55,13 @@ fn label(panel: ActivityPanel) -> SharedString {
         ActivityPanel::Workspaces => fl!("sidebar-activity-workspaces"),
         ActivityPanel::PullRequests => fl!("sidebar-activity-pull-requests"),
         ActivityPanel::Issues => fl!("sidebar-activity-issues"),
+        ActivityPanel::Kanban => fl!("kanban-title"),
         ActivityPanel::Tasks => fl!("sidebar-activity-tasks"),
         ActivityPanel::Security => fl!("sidebar-activity-security"),
         ActivityPanel::Automations => fl!("sidebar-activity-automations"),
         ActivityPanel::Ports => fl!("sidebar-activity-ports"),
         ActivityPanel::Usage => fl!("sidebar-activity-usage"),
+        ActivityPanel::Walkr => fl!("sidebar-activity-walkr"),
     }
     .into()
 }
@@ -68,11 +72,13 @@ fn icon(panel: ActivityPanel) -> &'static str {
         ActivityPanel::Workspaces => "icons/terminal.svg",
         ActivityPanel::PullRequests => "icons/pull-request.svg",
         ActivityPanel::Issues => "icons/issue.svg",
+        ActivityPanel::Kanban => "icons/kanban.svg",
         ActivityPanel::Tasks => "icons/beads.svg",
         ActivityPanel::Security => "icons/shield.svg",
         ActivityPanel::Automations => "icons/automations.svg",
         ActivityPanel::Ports => "icons/plug.svg",
         ActivityPanel::Usage => "icons/chart.svg",
+        ActivityPanel::Walkr => "icons/walkr.svg",
     }
 }
 
@@ -218,6 +224,11 @@ impl SheprdWindow {
         match panel {
             ActivityPanel::Automations => self.config.sidebar_style.automations,
             ActivityPanel::Tasks => self.activity.tasks_listed,
+            ActivityPanel::Walkr => {
+                self.walkr.run().is_some()
+                    || self.walkr.has_sessions()
+                    || self.config.walkr.url.is_some()
+            }
             _ => true,
         }
     }
@@ -303,6 +314,10 @@ impl SheprdWindow {
         if panel == ActivityPanel::Workspaces && !self.sidebar_visible {
             self.toggle_sidebar();
         }
+        #[cfg(embedded_pages)]
+        if panel == ActivityPanel::Walkr {
+            self.walkr.page_requested = true;
+        }
         // A section picked is where the user is now, not a place to go back to.
         self.activity.return_to = None;
         self.activity.app = None;
@@ -316,7 +331,8 @@ impl SheprdWindow {
                 | ActivityPanel::Security
                 | ActivityPanel::Automations
                 | ActivityPanel::Ports
-                | ActivityPanel::Usage,
+                | ActivityPanel::Usage
+                | ActivityPanel::Walkr,
             ) => {
                 let focus = self
                     .activity
@@ -347,7 +363,11 @@ impl SheprdWindow {
             ActivityPanel::Automations => self.render_automations_section(cx),
             ActivityPanel::Ports => self.render_local_ports_section(cx),
             ActivityPanel::Usage => self.render_usage_section(cx),
-            ActivityPanel::PullRequests | ActivityPanel::Issues | ActivityPanel::Tasks => {
+            ActivityPanel::Walkr => self.render_walkr_section(window, cx),
+            ActivityPanel::PullRequests
+            | ActivityPanel::Issues
+            | ActivityPanel::Kanban
+            | ActivityPanel::Tasks => {
                 return self.render_orchestrator_section();
             }
         };
@@ -728,10 +748,12 @@ fn panel_selector(panel: ActivityPanel) -> &'static str {
         ActivityPanel::Workspaces => "activity-workspaces",
         ActivityPanel::PullRequests => "activity-pull-requests",
         ActivityPanel::Issues => "activity-issues",
+        ActivityPanel::Kanban => "activity-kanban",
         ActivityPanel::Tasks => "activity-tasks",
         ActivityPanel::Security => "activity-security",
         ActivityPanel::Automations => "activity-automations",
         ActivityPanel::Ports => "activity-ports",
         ActivityPanel::Usage => "activity-usage",
+        ActivityPanel::Walkr => "activity-walkr",
     }
 }

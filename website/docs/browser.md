@@ -9,7 +9,7 @@ platforms: macOS, Windows
 
 Browser tabs show web pages and local files next to a workspace's terminals. This page covers opening and using them, annotating a page to send notes to an agent, how local files are served, and the commands agents use to open pages for you.
 
-> **Linux.** Linux has no embedded pages yet. Browser tab requests open your system browser, and local files and annotations are unavailable.
+> **Linux.** Linux has no embedded pages yet. Browser tab requests open your system browser, a local file opens as its source, and annotations are unavailable.
 
 ## Opening a browser tab
 
@@ -71,7 +71,24 @@ A local page can queue a result for its agent, such as the mockup variant you pi
 - Only that folder is served. Hidden files and folders, and files a link leads out of the folder to, are never served. A folder holding your home directory is refused.
 - Web pages cannot load the folder's files.
 - Files are never cached, so `sheprd browser reload` shows an edited file.
-- A Markdown file (`.md`, `.markdown`) opens rendered. Its scripts never run.
+- A Markdown file (`.md`, `.markdown`) opens rendered, in the window's theme colors: tables, task lists, footnotes, heading anchors, and fenced code with syntax colors (the first 400 lines of a block, and 1,000 lines or 48 KiB of a page; the rest stays plain). An open page follows a theme change. Its scripts never run. A relative link to another Markdown file of the folder opens that file rendered in the same tab.
+- An HTML page runs its own scripts and loads its folder's files. It can reach the web like any page. Site storage is what the platform's web view gives a local page: on Linux with the `servo` feature, `localStorage` is not available to it. It cannot read other folders.
+
+### The file bar
+
+A tab that shows a local file has a bar under the toolbar:
+
+- A breadcrumb of the file's path, from the workspace's folder. Click a folder of it to show the [file explorer](editors.md#file-explorer) with that folder open, when the explorer lists that folder. A Markdown tab is named by the file; an HTML page keeps its own title.
+- For a Markdown or HTML file, a switch between **Rendered** and **Source**. The source is the read-only code view. `sheprd browser open FILE --source` opens the source directly, and the `toggle_source` command (in the palette as **Toggle Source or Rendered Page**) switches the file in view; bind it under `[keybindings]`. The switch is kept for each tab while the window is open. A tab that goes on to a web address shows that page.
+- **Open in Editor**, for a Markdown or HTML file, opens it in your terminal editor.
+
+The tab follows the file: when it changes on disk, the page reloads, or the source is read again and keeps its place. The toolbar's reload button does the same by hand. Only the file itself is watched, not the stylesheets or scripts a page loads.
+
+A Markdown or HTML file in a hidden folder (such as `.local/`), or directly in your home folder, never renders as a page. It opens as its source instead. The bar says why, **Rendered** is refused, and `sheprd browser open` answers "as source, not as a page".
+
+A build that cannot render pages (Linux without the `servo` feature) opens every local file as its source, says so in the bar and in the command's answer, and refuses **Rendered**.
+
+A Markdown or HTML file opened from the [file explorer](editors.md#files-opened-from-the-tree) gets the same view by the same rule. Any other file differs: `sheprd browser open` shows it as a page, because the caller asked for a page, while the explorer shows it as code.
 
 Local pages can load a small kit at `/.herdr/kit.css` and `/.herdr/kit.js` for interactive explainers and mockups, and `/.herdr/theme.css` for the window's theme colors. `sheprd browser example` prints a complete page built on it.
 

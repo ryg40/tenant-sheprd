@@ -7,11 +7,14 @@ mod batch;
 mod browser;
 mod chat;
 mod exec;
+mod files;
 mod hosts;
+mod kanban;
 mod mods;
 mod remote;
 mod settings;
 mod tabs;
+mod walkr;
 mod work;
 
 use super::CliError;
@@ -22,6 +25,7 @@ pub use batch::BatchCommand;
 pub use browser::{BrowserCommand, Placement};
 pub use chat::ChatCommand;
 pub use exec::ExecCommand;
+pub use files::FilesCommand;
 pub use hosts::{
     AutomationCommand, CloudCommand, HostCommand, PortsCommand, PrCommand, SecurityCommand,
 };
@@ -33,6 +37,7 @@ pub use settings::{
 };
 use std::ffi::OsString;
 pub use tabs::{CodeCommand, FileAt, Items, ItemsOf, OrchestratorCommand, TabCommand};
+pub use walkr::{RunSource, WalkrCommand};
 pub use work::{CheckpointCommand, FanOut, NotesCommand, WaitFor, WorktreeCommand};
 
 /// What to do, and how the answer is printed.
@@ -52,6 +57,7 @@ pub enum ControlCommand {
     /// Usage for every command, or for one family.
     Help(Option<&'static str>),
     Status,
+    Walkr(WalkrCommand),
     Skill,
     Browser(BrowserCommand),
     App(AppCommand),
@@ -98,6 +104,8 @@ pub enum ControlCommand {
     Remote(RemoteCommand),
     /// The mods the window runs; `check` runs here.
     Mod(ModCommand),
+    /// The file explorer on the window's right.
+    Files(FilesCommand),
     Search {
         files: bool,
         query: String,
@@ -223,8 +231,16 @@ pub const FAMILIES: &[(&str, &str)] = &[
         "mod",
         "Mods: list, reload, read logs, or check a mod folder",
     ),
+    (
+        "files",
+        "The file explorer: show, hide, or reveal a file in it",
+    ),
     ("search", "Find a symbol or a file in the focused checkout"),
     ("config", "Sheprd settings: path, get, set, reload, check"),
+    (
+        "walkr",
+        "Connect a running Walkr to its section, and check that it answers",
+    ),
     ("theme", "List or choose a color theme"),
     ("font", "List or choose the terminal font"),
     ("language", "The language Sheprd shows, or choose one"),
@@ -379,6 +395,7 @@ fn command(family: &'static str, args: &mut Args) -> Result<ControlCommand, CliE
         "automation" => ControlCommand::Automation(hosts::automation(args)?),
         "remote" => ControlCommand::Remote(remote::remote(args)?),
         "mod" => ControlCommand::Mod(mods::command(args)?),
+        "files" => ControlCommand::Files(files::command(args)?),
         "search" => {
             let files = match args.verb().as_ref().and_then(|verb| verb.to_str()) {
                 Some("symbol" | "symbols") => false,
@@ -395,6 +412,7 @@ fn command(family: &'static str, args: &mut Args) -> Result<ControlCommand, CliE
             }
         }
         "config" => ControlCommand::Config(settings::config(args)?),
+        "walkr" => ControlCommand::Walkr(walkr::command(args)?),
         "theme" => ControlCommand::Theme(settings::theme(args)?),
         "font" => ControlCommand::Font(settings::theme(args)?),
         "language" => ControlCommand::Language(settings::language(args)?),

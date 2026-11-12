@@ -9,6 +9,7 @@
 pub mod checkpoint;
 pub mod code_index;
 mod error;
+pub mod file_tree;
 pub mod git;
 
 pub use error::{Error, Result};

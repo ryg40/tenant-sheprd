@@ -67,6 +67,12 @@ sheprd browser open http://localhost:3000
   links to CSS, scripts, and images work. Keep the page and its assets in a
   dedicated folder: never your home directory, and nothing in a hidden
   folder. Files whose names start with a dot are never served.
+- The command's output says how the file opened. "as source, not as a page"
+  (`"source": "folder"` or `"build"` with `--json`) means the user sees the
+  file's text, not the page: a Markdown or HTML file in a hidden folder
+  (`.local/`, `.cache/`) or directly in the home directory always opens so.
+  To show the page, write it to a folder that is not hidden and open it
+  again.
 - A Markdown file (`.md`, `.markdown`) opens rendered, like a note in
   Obsidian: safe HTML in it renders, its scripts never run, and `https`
   images load. Links to other Markdown files in the folder open rendered too.
@@ -222,7 +228,9 @@ user sends on the page arrive as your next prompt; `browser feedback` does
 not work there.
 
 On Linux a default build has no embedded browser: web pages open in the
-system browser, and local files and annotations are not available (exit 8).
+system browser, a local file opens as its source in a tab (exit 0, the
+output says "as source"; tell the user the page did not render), and
+annotations are not available (exit 8).
 A build with the `servo` feature shows web pages and local files in tabs:
 `browser open`, `--beside`, navigation, zoom, and `browser text` work.
 Notes, annotation, and `herdr.send` are not checked there yet, so say so
@@ -248,6 +256,8 @@ for what only Sheprd shows or keeps.
 | To | Run |
 | --- | --- |
 | Show a file at a line, read-only | `sheprd code open src/main.rs:42` |
+| Show a Markdown or HTML file rendered, or its source | `sheprd browser open docs/plan.md`, `sheprd browser open docs/plan.md --source` |
+| Point the user at a file in the file explorer | `sheprd files reveal docs/guide.md` |
 | Open the review of your uncommitted changes | `sheprd review` |
 | Open px0 to browse, edit, or review your local checkout (macOS/Windows) | `sheprd px0 open` |
 | Get notes the user sent this pane (pages, reviews, terminals) | `sheprd feedback --wait 600` |
@@ -256,6 +266,9 @@ for what only Sheprd shows or keeps.
 | Silence a whole host's notifications | `sheprd host mute studio` |
 | Save the working tree before a risky change, and compare later | `sheprd checkpoint create before refactor`, `sheprd checkpoint diff ID` |
 | Your branch's pull request, its checks, and (with your workspace focused) its comments | `sheprd pr`, `sheprd pr checks`, `sheprd pr comments` |
+| Show the read-only GitHub and Forgejo Kanban board | `sheprd ui panel kanban` |
+| Read the window's prepared board without showing it | `sheprd orchestrator board --json`, then `sheprd orchestrator board --cursor CURSOR --json` |
+| Order a known lane locally, before another or at the end; use canonical keys from board output | `sheprd orchestrator board order LANE [--before LANE] --json` |
 | Diagnose missing GitHub details: last reported GraphQL quota and rate-limit retry delays | `sheprd pr quota --json` |
 | List the vulnerability reports outsiders filed and the open Dependabot alerts of your repositories, most severe first | `sheprd security --json` |
 | Show the user an alert's or a vulnerability report's page in Sheprd | `sheprd security open OWNER/NAME 42` or `... GHSA-xxxx-xxxx-xxxx` |
@@ -272,6 +285,9 @@ for what only Sheprd shows or keeps.
 | List or focus the app's windows and its own tabs | `sheprd window`, `sheprd tab`, `sheprd tab focus ID` |
 | Read the alerts the user may have missed | `sheprd window alerts` |
 | Block until something happens in the app | `sheprd wait tab-closed ID --timeout 600`, `sheprd events --follow` |
+| Check that Walkr can be reached before asking the user to review there | `sheprd walkr status` |
+| Show the Walkr section (needs a run, a saved Compare session on this computer, or `walkr.url`) | `sheprd ui panel walkr` |
+| Show a Walkr run you started in Sheprd's Walkr section | `sheprd walkr connect - --show` |
 | Read or change a Sheprd setting | `sheprd config get KEY`, `sheprd config set KEY VALUE` |
 | Install agents or rerun the setup script on a saved cloud machine | `sheprd config set cloud.agents '["claude"]'`, `sheprd cloud setup ID` |
 | Get cloud machines of your own (the user confirms once), and wait until they are ready | `sheprd cloud create coder --count 3 --json`, `sheprd cloud wait BATCH --timeout 600 --json` |
@@ -280,6 +296,10 @@ for what only Sheprd shows or keeps.
 | Check remote control and its daemon-host network interfaces, or pair a phone (Tailscale preferred; optionally choose an origin from status) | `sheprd remote status`, `sheprd remote pair [--address HTTPS_ORIGIN]` |
 | Keep the machine awake during a long job | `sheprd caffeine on --for 2h` |
 | Check whether the app runs, and which windows and hosts it has | `sheprd status` |
+
+Board pages bind their cursor to the window and revision. On exit 4, retry a pending read or restart a stale cursor without `--cursor`.
+Each page holds at most 100 cards and 192 KiB, including metadata. Done is loaded settled data, not a complete archive.
+Card moves are not available yet. Board commands never approve or send tracker writes.
 
 Automations are Luau scripts `sheprd-automate` runs on a host on a schedule
 or by hand (see `docs/automations.md`). Write one in

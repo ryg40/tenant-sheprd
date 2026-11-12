@@ -50,7 +50,7 @@ Herdr 1 sessions, herdr-core terminals, agent chats, worktrees, review, the orch
 
 - Application shortcuts use **Ctrl+Shift**, such as Ctrl+Shift+T for a new tab and Ctrl+Shift+C/V for copy and paste. Super stays free for the desktop and plain Ctrl keys for terminal programs. Ctrl+Shift+U is left unbound for Unicode entry.
 - Rendering uses Vulkan, so a Vulkan driver for your GPU is required. On a laptop with two GPUs, install the driver for the one your display uses.
-- There are no embedded web pages yet. Browser tab requests open the system browser, and local files and page annotations are unavailable.
+- There are no embedded web pages yet. Browser tab requests open the system browser, a local file opens as its source in a tab, and page annotations are unavailable.
 - There is no badge with the agent count.
 - System notifications use the freedesktop notification service; without a notification daemon nothing appears. Each event shows separately.
 - Sound needs the system ALSA library and a default audio device. Custom notification sounds are MP3 only.

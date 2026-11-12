@@ -50,6 +50,9 @@ Copyright (c) 2011 to Present Mark Badolato, MIT License; each theme's
 copyright belongs to its author. crates/sheprd-gpui/THEMES-NOTICE.md has the
 revision and the full license text.
 
+The icon assets/icons/kanban.svg is original interface artwork: three rounded
+vertical bars, licensed under this project's Apache License 2.0.
+
 The icons assets/icons/vscode.svg, error.svg, and pass.svg are Codicons,
 Copyright (c) Microsoft Corporation, from
 https://github.com/microsoft/vscode-codicons at revision

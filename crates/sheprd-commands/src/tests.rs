@@ -98,6 +98,7 @@ fn catalog_has_all_native_commands_and_gpui_shortcuts() {
         (ToggleSidebar, &["cmd-b"]),
         (ToggleStatusBar, &["cmd-alt-b"]),
         (ToggleModPanel, &[]),
+        (ToggleFileExplorer, &[]),
         (FocusNextRegion, &["cmd-f6"]),
         (FocusPreviousRegion, &["cmd-shift-f6"]),
         (ToggleZenMode, &["ctrl-cmd-z"]),
@@ -128,6 +129,7 @@ fn catalog_has_all_native_commands_and_gpui_shortcuts() {
         (ReviewChanges, &[]),
         (GitMenu, &[]),
         (ToggleAnnotate, &[]),
+        (ToggleSource, &[]),
         (InstallBrowserSkill, &[]),
         (SplitEditor, &["cmd-\\"]),
         (OpenCode, &[]),
@@ -240,6 +242,7 @@ fn gui_commands_never_send_daemon_requests() {
         Command::ReviewChanges,
         Command::GitMenu,
         Command::ToggleAnnotate,
+        Command::ToggleSource,
     ] {
         assert!(request(command, &s).is_none(), "{command:?}");
     }

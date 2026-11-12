@@ -16,6 +16,7 @@ fn open(url: &str) -> Request {
         caller: Caller::default(),
         focus: true,
         placement: crate::protocol::Placement::Tab,
+        source: false,
     })
 }
 
@@ -43,6 +44,7 @@ fn a_request_reaches_the_ui_and_its_answer_reaches_the_caller() {
         opened_in: OpenedIn::Tab,
         workspace_id: Some("w_1".into()),
         placement: crate::protocol::Placement::Beside,
+        source: None,
     };
     incoming.respond(expected.clone());
     assert_eq!(caller.join().unwrap().unwrap(), expected);

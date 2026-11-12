@@ -224,9 +224,34 @@ impl SheprdWindow {
         #[cfg(not(servo_pages))]
         let blank_hint: Option<Div> = None;
         let failure = self.browser.failed.get(&id).cloned();
+        let local = matches!(tab.location, Some(Location::Local { .. }));
+        // A local page that shows its source: its page stays, hidden.
+        let source = self.browser.file_views.shows_source(tab);
+        let file_bar = self.file_bar(slot, tab, cx);
+        // A build without pages still shows a local file's source.
+        let offer_source = (local && !source && !crate::browser::EMBEDDED).then(|| {
+            div()
+                .id("browser-show-source")
+                .debug_selector(move || slot.selector("browser-show-source"))
+                .px(px(10.))
+                .py(px(2.))
+                .rounded(px(crate::config::corners::CONTROL))
+                .border_1()
+                .border_color(rgb(self.theme.active))
+                .text_color(rgb(self.theme.foreground))
+                .cursor_pointer()
+                .hover(|button| button.bg(rgb(self.theme.active)))
+                .child(fl!("browser-file-show-source"))
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.show_file_source(id, true, true, window, cx);
+                }))
+        });
         let placeholder: SharedString = match (&failure, loaded) {
             (Some(message), _) => fl!("browser-page-failed", error = message.to_string()).into(),
             (None, false) => fl!("browser-page-empty").into(),
+            (None, true) if !crate::browser::EMBEDDED && local => {
+                fl!("browser-file-unsupported").into()
+            }
             (None, true) if !crate::browser::EMBEDDED => fl!("browser-page-unsupported").into(),
             (None, true) => fl!("browser-page-loading").into(),
         };
@@ -274,12 +299,8 @@ impl SheprdWindow {
                 "icons/refresh.svg",
                 loaded,
                 cx,
-                move |this, _, _| {
-                    #[cfg(embedded_pages)]
-                    this.browser.pages.reload(id);
-                    #[cfg(not(embedded_pages))]
-                    let _ = this;
-                },
+                // A file's source is read again, like its page.
+                move |this, _, cx| this.reload_file_view(id, cx),
             ))
             .child(
                 div()
@@ -330,6 +351,7 @@ impl SheprdWindow {
                 },
             ));
         let content = match (page, &failure, tab.place.editor()) {
+            _ if source => self.render_code_tab(slot, tab, cx),
             (Some(page), None, _) => self.page_area(page).into_any_element(),
             (_, _, Some(editor)) => self.render_editor_status(editor, failure.clone(), cx),
             _ => div()
@@ -347,6 +369,7 @@ impl SheprdWindow {
                         .debug_selector(move || slot.selector("browser-placeholder"))
                         .child(placeholder),
                 )
+                .children(offer_source)
                 .children(
                     (failure.is_none() && !loaded)
                         .then(|| self.render_blank_ports(slot, id, cx))
@@ -368,7 +391,12 @@ impl SheprdWindow {
             .when(keyboard, |browser| browser.track_focus(&self.focus))
             // VS Code fills its tab: it is an editor, not a page to browse,
             // so it has no address, navigation, or notes of a browser's.
-            .when(!code, |browser| browser.child(toolbar).children(blank_hint))
+            .when(!code, |browser| {
+                browser
+                    .child(toolbar)
+                    .children(file_bar)
+                    .children(blank_hint.filter(|_| !source))
+            })
             .child(
                 div()
                     .flex()

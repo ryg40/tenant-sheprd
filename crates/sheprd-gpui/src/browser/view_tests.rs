@@ -46,6 +46,9 @@ mod embedded;
 #[cfg(embedded_pages)]
 mod favicon;
 
+/// A local file's tab between its page and its source.
+mod file_source;
+
 /// The pill on a divider between groups, under real pointer events.
 mod divider_grip;
 
@@ -126,6 +129,12 @@ mod overlays;
 
 /// What closing a workspace does to its browser tabs.
 mod workspace_close;
+
+mod walkr_page;
+
+/// A run that `walkr connect` named: its page, Close, and the idle limit.
+#[cfg(embedded_pages)]
+mod walkr_run;
 
 /// The font size keys zoom a browser tab's page. Only builds that show
 /// pages open a browser tab.

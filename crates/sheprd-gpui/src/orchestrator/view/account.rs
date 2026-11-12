@@ -28,11 +28,14 @@ impl OrchestratorView {
             .background_executor()
             .spawn(async move { forgejo::account_host() });
         cx.spawn(async move |this, cx| {
-            let Some(host) = found.await else {
-                return;
-            };
+            let host = found.await;
             let _ = this.update(cx, |view, cx| {
-                view.add_forgejo_account(host);
+                if let Some(host) = host {
+                    view.add_forgejo_account(host);
+                }
+                view.kanban.account_ready = true;
+                view.kanban.invalidate();
+                view.prepare_kanban(cx);
                 cx.notify();
             });
         })

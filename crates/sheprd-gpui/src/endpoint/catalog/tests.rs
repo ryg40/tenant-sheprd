@@ -137,3 +137,20 @@ fn cloud_devices_follow_ssh_hosts_and_survive_an_unreadable_list(cx: &mut gpui::
 
 mod storage_warning;
 mod wsl;
+
+impl Catalog {
+    pub(crate) fn unavailable_for_test(failed: bool) -> Self {
+        let mut catalog = Self::new(&ConnectTarget::Local);
+        let (tx, rx) = mpsc::sync_channel(1);
+        catalog.pending = Some(rx);
+        catalog.choose(LOCAL);
+        if failed {
+            let _ = tx.send(Err(std::io::Error::from(
+                std::io::ErrorKind::PermissionDenied,
+            )
+            .into()));
+            assert!(catalog.poll().is_some_and(|result| result.is_err()));
+        }
+        catalog
+    }
+}

@@ -152,6 +152,7 @@ pub fn request(command: Command, snapshot: &ClientShellSnapshot) -> Option<(Meth
         | Command::ToggleSidebar
         | Command::ToggleStatusBar
         | Command::ToggleModPanel
+        | Command::ToggleFileExplorer
         | Command::FocusNextRegion
         | Command::FocusPreviousRegion
         | Command::ToggleZenMode
@@ -183,6 +184,7 @@ pub fn request(command: Command, snapshot: &ClientShellSnapshot) -> Option<(Meth
         | Command::ReviewChanges
         | Command::GitMenu
         | Command::ToggleAnnotate
+        | Command::ToggleSource
         | Command::InstallBrowserSkill
         | Command::SplitEditor
         | Command::OpenCode

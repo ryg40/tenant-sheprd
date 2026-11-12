@@ -111,6 +111,7 @@ desktop margins must not be baked into these images. The paw fits both masks.
 `teleport-back.svg`, `zoom.svg`, the `window-*.svg` controls, `pull-request.svg`,
 `issue.svg`, `beads.svg`, `user.svg`, `cpu.svg`, and `brain.svg` are original
 interface artwork.
+`kanban.svg` is original Apache-2.0 interface artwork: three rounded vertical bars.
 GPUI renders these as masks tinted by the current theme.
 
 `gitlab.svg` is GitLab's tanuki mark from

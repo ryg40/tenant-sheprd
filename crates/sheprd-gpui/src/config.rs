@@ -65,6 +65,7 @@ mod table;
 pub(crate) use sidebar_style::parse_hex;
 mod theme;
 mod updates;
+mod walkr;
 pub(crate) mod watch;
 mod worktrees;
 mod zen;
@@ -153,6 +154,7 @@ pub use theme::Theme;
 pub(crate) use theme::ThemeName;
 pub(crate) use theme::mix;
 pub use updates::{UpdateChannel, UpdatesConfig};
+pub use walkr::WalkrConfig;
 pub use zen::{Zen, ZenWidth};
 
 const DEFAULT_CONFIG: &str = include_str!("../config-gpui.example.toml");
@@ -234,6 +236,7 @@ pub struct Config {
     /// none installed, so Private Use Area glyphs draw as missing-glyph boxes.
     /// Never set when the config names the terminal's `fallback` itself.
     pub(crate) icon_font_missing: bool,
+    pub kanban: sheprd_orchestrator::kanban::config::Mappings,
     /// Whether a terminal selection stays highlighted, and readable by
     /// selection tools, after it is copied.
     pub keep_selection_after_copy: bool,
@@ -331,6 +334,7 @@ pub struct Config {
     /// Which releases the in-app updater offers.
     pub updates: UpdatesConfig,
     pub usage: crate::usage::UsageConfig,
+    pub walkr: WalkrConfig,
     /// How linked worktrees are marked apart from their main checkout.
     pub worktrees: crate::worktree_identity::Worktrees,
     /// What Toggle Zen Mode does beyond hiding the chrome.
@@ -411,6 +415,7 @@ impl Default for Config {
             gitlab: GitLabConfig::default(),
             herdr_2_terminals: false,
             icon_font_missing: false,
+            kanban: sheprd_orchestrator::kanban::config::Mappings::default(),
             keep_selection_after_copy: true,
             keybinding_overrides: BTreeMap::new(),
             keybindings: Keymap::default(),
@@ -462,6 +467,7 @@ impl Default for Config {
             unknown_keys: Vec::new(),
             updates: UpdatesConfig::default(),
             usage: crate::usage::UsageConfig::default(),
+            walkr: WalkrConfig::default(),
             worktrees: crate::worktree_identity::Worktrees::default(),
             zen: Zen::default(),
             // keep-sorted end
@@ -504,6 +510,7 @@ struct Settings {
     github: GitHubConfig,
     gitlab: GitLabConfig,
     herdr_2_terminals: Option<bool>,
+    kanban: sheprd_orchestrator::kanban::config::Config,
     keep_selection_after_copy: Option<bool>,
     keybindings: BTreeMap<String, Binding>,
     language: Option<sheprd_i18n::Language>,
@@ -545,6 +552,7 @@ struct Settings {
     ui: FontSettings,
     updates: UpdatesConfig,
     usage: crate::usage::UsageConfig,
+    walkr: WalkrConfig,
     worktrees: worktrees::WorktreeSettings,
     zen: zen::ZenSettings,
     // keep-sorted end
@@ -818,6 +826,10 @@ impl Config {
         config.github = settings.github;
         config.azure_devops = settings.azure_devops;
         config.gitlab = settings.gitlab;
+        config.kanban = settings
+            .kanban
+            .try_into()
+            .map_err(sheprd_orchestrator::Error::from)?;
         #[cfg(feature = "azure")]
         settings.azure.check()?;
         config.azure = settings.azure;
@@ -941,6 +953,7 @@ impl Config {
         config.option_as_alt = settings.option_as_alt;
         config.open_links_in = settings.open_links_in;
         config.code = settings.code;
+        config.walkr = settings.walkr;
         settings.px0.check()?;
         config.px0 = settings.px0;
         settings.remote.check()?;

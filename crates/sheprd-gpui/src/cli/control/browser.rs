@@ -14,6 +14,8 @@ pub enum BrowserCommand {
         focus: bool,
         /// `--beside` or `--tab`; otherwise chosen by what the page is.
         placement: Option<Placement>,
+        /// `--source`: a local file opens as its source, not its page.
+        source: bool,
     },
     Reload,
     /// Waits up to `wait` seconds for notes; zero only checks.
@@ -163,13 +165,14 @@ pub(super) fn parse(args: &mut Args) -> Result<BrowserCommand, CliError> {
         _ => return Err(CliError::UnknownBrowserCommand(command)),
     }
     let (mut target, mut workspace, mut focus) = (None, None, true);
-    let mut placement = None;
+    let (mut placement, mut source) = (None, false);
     while let Some(arg) = args.next() {
         match arg.to_str() {
             Some("--help" | "-h") => return Ok(BrowserCommand::Help),
             Some("--no-focus") => focus = false,
             Some("--beside") => placement = Some(Placement::Beside),
             Some("--tab") => placement = Some(Placement::Tab),
+            Some("--source") => source = true,
             Some("--workspace") => {
                 let value = args
                     .next()
@@ -190,5 +193,6 @@ pub(super) fn parse(args: &mut Args) -> Result<BrowserCommand, CliError> {
         workspace,
         focus,
         placement,
+        source,
     })
 }

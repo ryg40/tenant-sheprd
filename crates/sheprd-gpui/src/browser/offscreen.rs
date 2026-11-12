@@ -27,6 +27,8 @@ pub(crate) struct Pages {
     /// The theme's colors the pages' own lists are drawn in.
     colors: Colors,
     pages: HashMap<TabId, Rc<Page>>,
+    /// Only reports from this instance may change the Walkr section.
+    walkr: Option<PageKey>,
     shown: Vec<TabId>,
     /// Where each page drew in the frame being drawn.
     drawn: Drawn,
@@ -52,6 +54,7 @@ impl Default for Pages {
         Self {
             colors: Colors::default(),
             pages: HashMap::new(),
+            walkr: None,
             shown: Vec::new(),
             drawn: Drawn::default(),
             reports,
@@ -105,14 +108,45 @@ impl Pages {
         cx: &mut Context<SheprdWindow>,
     ) -> crate::Result<()> {
         // A review tab is drawn by the app; only pages get a web view.
-        let Some(location) = tab
-            .location
-            .as_ref()
-            .filter(|location| location.is_page())
-            .filter(|_| !self.pages.contains_key(&tab.id))
-        else {
+        let Some(location) = tab.location.as_ref().filter(|location| location.is_page()) else {
             return Ok(());
         };
+        // The folder this page may read. A web page gets none, and a page
+        // keeps the folder it was created with wherever it navigates.
+        let root = match location {
+            Location::Local { file } => Some(file.root().to_owned()),
+            Location::Web { .. }
+            | Location::Review { .. }
+            | Location::Code { .. }
+            | Location::Orchestrator { .. }
+            | Location::Devices
+            | Location::CoreTerminal { .. } => None,
+        };
+        self.make(tab.id, location.page_url(), root, cx)
+    }
+
+    /// Creates the Walkr section's page at `address` if the window has none.
+    /// No tab stands for it: a tab's `Debug` would hold the whole address.
+    pub(crate) fn ensure_walkr(
+        &mut self,
+        address: &crate::walkr::run::Address,
+        _: &mut Window,
+        cx: &mut Context<SheprdWindow>,
+    ) -> crate::Result<()> {
+        self.make(TabId::WALKR, address.expose().to_owned(), None, cx)
+    }
+
+    /// Creates tab `id`'s page at `url`, unless the window has it.
+    fn make(
+        &mut self,
+        id: TabId,
+        url: String,
+        root: Option<std::path::PathBuf>,
+        cx: &mut Context<SheprdWindow>,
+    ) -> crate::Result<()> {
+        if self.pages.contains_key(&id) {
+            return Ok(());
+        }
         let engine = Engine::get()?;
         if self.redraw.is_none() {
             let notifier = self.notifier.clone();
@@ -126,29 +160,24 @@ impl Pages {
             }));
             engine.send(Command::Theme(self.theme.1.clone()))?;
         }
-        // The folder this page may read. A web page gets none, and a page
-        // keeps the folder it was created with wherever it navigates.
-        let root = match location {
-            Location::Local { file } => Some(file.root().to_owned()),
-            Location::Web { .. }
-            | Location::Review { .. }
-            | Location::Code { .. }
-            | Location::Orchestrator { .. }
-            | Location::Devices
-            | Location::CoreTerminal { .. } => None,
-        };
         let key: PageKey = NEXT_PAGE.fetch_add(1, Ordering::Relaxed);
+        let source = if id == TabId::WALKR {
+            Source::Walkr(key)
+        } else {
+            Source::Tab(id)
+        };
         let (mailbox, latest) = (Arc::new(Mailbox::default()), Arc::new(Latest::default()));
         // An engine that did not take the page leaves the tab without one,
         // so showing the tab again asks again.
         engine.send(Command::Open(Box::new(Open {
             key,
-            url: location.page_url(),
+            url,
             // Only a local page, which the agent wrote, gets `herdr.send`.
             bridge: root.is_some(),
             root,
             light: self.light,
-            source: Source::Tab(tab.id),
+            log_console: id != TabId::WALKR,
+            source,
             reports: self.reports.clone(),
             mailbox: mailbox.clone(),
             notifier: self.notifier.clone(),
@@ -159,22 +188,27 @@ impl Pages {
             engine,
             mailbox,
             latest,
-            (self.reports.clone(), Source::Tab(tab.id)),
+            (self.reports.clone(), source),
             cx.focus_handle(),
             self.retired.clone(),
         );
-        self.pages.insert(tab.id, Rc::new(page));
+        self.pages.insert(id, Rc::new(page));
+        if id == TabId::WALKR {
+            self.walkr = Some(key);
+        }
         Ok(())
     }
 
     /// Serves `theme` to local pages from now on: a page picks it up when it
     /// next loads. Every page reports its light or dark at once. Cheap when
-    /// the colors did not change.
-    pub(crate) fn set_theme(&mut self, theme: &crate::config::Theme) {
+    /// the colors did not change. Returns whether they changed from an
+    /// earlier theme, so pages that hold the old colors want loading again.
+    pub(crate) fn set_theme(&mut self, theme: &crate::config::Theme) -> bool {
         self.colors = Colors::from(theme);
         let key = super::kit::theme_key(theme);
-        if self.theme.0 == key && !self.theme.1.is_empty() {
-            return;
+        let first = self.theme.1.is_empty();
+        if self.theme.0 == key && !first {
+            return false;
         }
         self.theme = (key, super::kit::theme_css(theme));
         if let Some(engine) = Engine::started()
@@ -189,6 +223,7 @@ impl Pages {
                 page.set_light(light);
             }
         }
+        !first
     }
 
     /// Frees the textures of frames no page shows any more.
@@ -220,6 +255,9 @@ impl Pages {
     }
 
     pub(crate) fn close(&mut self, id: TabId) {
+        if id == TabId::WALKR {
+            self.walkr = None;
+        }
         self.shown.retain(|shown| *shown != id);
         self.drawn.borrow_mut().remove(&id);
         // Dropping the page closes its view on the engine's thread.
@@ -305,6 +343,13 @@ impl Pages {
         }
     }
 
+    /// Whether the window sent tab `id`'s page a key, pointer, or scroll
+    /// input since this was last asked. The Walkr section counts it as
+    /// activity.
+    pub(crate) fn took_input(&self, id: TabId) -> bool {
+        self.pages.get(&id).is_some_and(|page| page.took_input())
+    }
+
     /// Hands the keyboard back from the page to the window.
     pub(crate) fn blur(&self, id: TabId) {
         if let Some(page) = self.pages.get(&id) {
@@ -321,9 +366,18 @@ impl Pages {
 
     /// The next thing the pages reported.
     pub(crate) fn next_event(&self) -> Option<Event> {
-        let event = self.events.try_recv().ok()?;
-        event.resolve(|source| match source {
-            Source::Tab(id) => Some(id),
-        })
+        while let Ok(event) = self.events.try_recv() {
+            let resolved = event.resolve(|source| match source {
+                Source::Tab(id) => Some(id),
+                Source::Walkr(key) => (self.walkr == Some(key)).then_some(TabId::WALKR),
+            });
+            if resolved.is_some() {
+                return resolved;
+            }
+        }
+        None
     }
 }
+
+#[cfg(test)]
+mod tests;

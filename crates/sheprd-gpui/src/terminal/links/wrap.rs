@@ -21,7 +21,7 @@ pub(super) const MAX_WRAPPED_ROWS: u16 = 16;
 
 /// Whether a cell reads as nothing, unless it continues a wide glyph, which
 /// only the row around it can tell: see [`continuations`].
-fn blank(cell: &CellData) -> bool {
+pub(super) fn blank(cell: &CellData) -> bool {
     !cell.skip && shown(cell).chars().all(char::is_whitespace)
 }
 
@@ -154,7 +154,7 @@ impl<'a> Area<'a> {
     }
 
     /// The area's cells in frame row `row`, if it has that row.
-    fn cells(&self, row: u16) -> Option<&'a [CellData]> {
+    pub(super) fn cells(&self, row: u16) -> Option<&'a [CellData]> {
         if !self.rows.contains(&row) {
             return None;
         }

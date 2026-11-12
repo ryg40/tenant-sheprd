@@ -51,12 +51,16 @@ pub(crate) enum PanelDrag {
     ReviewFiles,
     /// The panel of mod sections on the window's right.
     ModPanel,
+    /// The file explorer on the window's right.
+    FileTree,
 }
 
 /// The notes panel beside a review or an annotated page.
 pub(crate) const NOTES: PanelWidth = PanelWidth::new(300., 220.);
 /// The panel of mod sections on the window's right.
 pub(crate) const MOD_PANEL: PanelWidth = PanelWidth::new(300., 220.);
+/// The file explorer on the window's right.
+pub(crate) const FILE_TREE: PanelWidth = PanelWidth::new(280., 200.);
 /// The review's list of changed files.
 pub(crate) const REVIEW_FILES: PanelWidth = PanelWidth::new(240., 160.);
 /// The settings window's section list.
@@ -212,6 +216,7 @@ impl crate::SheprdWindow {
             PanelDrag::PageNotes => Some((&mut self.notes_width, Side::Right)),
             PanelDrag::ReviewFiles => Some((&mut self.review_files_width, Side::Left)),
             PanelDrag::ModPanel => Some((&mut self.mod_panel_width, Side::Right)),
+            PanelDrag::FileTree => Some((&mut self.file_tree_width, Side::Right)),
             PanelDrag::SettingsNavigation | PanelDrag::DiffSides => None,
         }
     }
@@ -224,6 +229,7 @@ impl crate::SheprdWindow {
             PanelDrag::PageNotes => Some((self.notes_width, Side::Right)),
             PanelDrag::ReviewFiles => Some((self.review_files_width, Side::Left)),
             PanelDrag::ModPanel => Some((self.mod_panel_width, Side::Right)),
+            PanelDrag::FileTree => Some((self.file_tree_width, Side::Right)),
             PanelDrag::SettingsNavigation | PanelDrag::DiffSides => None,
         }
     }

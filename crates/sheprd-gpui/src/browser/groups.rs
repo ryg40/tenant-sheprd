@@ -214,15 +214,18 @@ impl Layout {
 
     /// A layout rebuilt from `saved`, with IDs from `ids`. Widths are
     /// scaled to fill the row. A group saved showing a tab that is not its
-    /// own shows nothing until it is given one.
+    /// own shows nothing until it is given one. A section or chat page has
+    /// its owner outside the store, so a saved layout that names one loses
+    /// that tab here and can never close the owner's page.
     pub(crate) fn restore(saved: &SavedLayout, ids: &mut GroupIds) -> Self {
+        let reserved = |pick: &Pick| matches!(pick, Pick::Page(id) if id.is_panel());
         let total: f32 = saved.groups.iter().map(|group| group.share).sum();
         let mut groups: Vec<Group> = saved
             .groups
             .iter()
             .map(|group| Group {
                 id: ids.next(),
-                pick: group.pick.clone(),
+                pick: group.pick.clone().filter(|pick| !reserved(pick)),
                 share: group.share / total,
             })
             .collect();
@@ -231,6 +234,7 @@ impl Layout {
             saved
                 .owners()
                 .into_iter()
+                .filter(|(pick, _)| !reserved(pick))
                 .map(|(pick, index)| (pick, groups[index].id))
                 .collect()
         } else {

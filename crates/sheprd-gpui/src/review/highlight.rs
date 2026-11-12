@@ -234,5 +234,50 @@ pub(crate) fn colour_file(name: &str, text: &str, limit: usize) -> Vec<Vec<Span>
         .collect()
 }
 
+/// The spans of each of the first `limit` lines of `text`, a fenced block a
+/// document marks as `language`: a grammar's name or a file extension, as
+/// `rust` or `rs`. An unknown language gives no spans. Blocking, as
+/// [`colour_file`] is.
+#[cfg(any(embedded_pages, test))]
+pub(crate) fn colour_snippet(language: &str, text: &str, limit: usize) -> Vec<Vec<Span>> {
+    let Some(syntax) = syntaxes().find_syntax_by_token(language) else {
+        return Vec::new();
+    };
+    let mut side = Side::new(syntax);
+    text.lines()
+        .take(limit)
+        .map(|line| side.line(line))
+        .collect()
+}
+
+/// What a page's stylesheet needs of the tokens.
+#[cfg(any(embedded_pages, test))]
+impl Token {
+    /// Every token, for a table that names each one.
+    pub(crate) const ALL: &[Self] = &[
+        Self::Comment,
+        Self::String,
+        Self::Number,
+        Self::Constant,
+        Self::Keyword,
+        Self::Type,
+        Self::Function,
+    ];
+
+    /// The token's name in a stylesheet.
+    // i18n: data
+    pub(crate) fn css_name(self) -> &'static str {
+        match self {
+            Self::Comment => "comment",
+            Self::String => "string",
+            Self::Number => "number",
+            Self::Constant => "constant",
+            Self::Keyword => "keyword",
+            Self::Type => "type",
+            Self::Function => "function",
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests;

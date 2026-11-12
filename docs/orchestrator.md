@@ -12,9 +12,10 @@ The orchestrator keeps its own per-repository SQLite database, in the app's
 state directory: `<state dir>/repositories/<uuid v5 of the canonical git
 common dir>/state.sqlite3`, private to the user. Repositories on SSH hosts
 are keyed by `ssh://<destination><git common dir>` and live on this machine.
-Its schema began as agent-launcher's (`PRAGMA user_version`, currently 3:
-version 2 added each open pull request's last read review and checks, and
-version 3 each bead's assignee and acceptance criteria):
+Its schema began as agent-launcher's (`PRAGMA user_version`, currently 4:
+version 2 added each open pull request's last read review and checks,
+version 3 each bead's assignee and acceptance criteria, and version 4 the
+separate bounded Kanban history cache):
 
 - The first time a repository opens, agent-launcher's database at
   `<data_local_dir>/agent-launcher/repositories/<same uuid>/state.sqlite3`
@@ -69,6 +70,215 @@ checking the terminal identity returned by worktree creation before each retry.
 An accepted launch, transport failure, or agent-readiness timeout is never
 replayed. Waiting happens on the action worker and observes cancellation;
 permanent failures retain the normal failed-run recording and worktree cleanup.
+
+## Kanban model
+
+`sheprd-orchestrator::kanban` prepares a pure board from existing snapshots.
+The Kanban activity section reuses the existing host, view entity, and repository workers.
+It keeps its own prepared rows and selection, without changing the Issues or Tasks data.
+`BoardColumn` lives in control-protocol and is re-exported by orchestrator.
+Control protocol version 19 adds `ui panel kanban` and `orchestrator board`.
+Version 20 adds `orchestrator board order` for local lane preferences.
+Version 21 adds each lane's Done history coverage to board responses.
+
+Preparation runs on the background executor with immutable snapshots and a revision fence.
+One virtual list aligns repository headers and compact card rows beneath fixed columns.
+One horizontal scroll offset keeps those headings and cells aligned at narrow widths.
+The board reads the existing roster, including Forgejo account repositories, and starts no discovery service.
+Showing Kanban uses the existing visible sync schedule. Board reads alone start no provider I/O.
+
+Cards remain read-only. Selection opens a popup with the existing item details and no action controls.
+Refresh and lane moves keep the selection, popup, collapsed lanes, and scroll position.
+Retained rows stay visible while the next projection prepares, but lane moves wait for its current revision.
+Lane grips, Alt+Up/Alt+Down, and `orchestrator board order` use one pure order reducer.
+Tab selects lane headers. A drop commits order; Escape discards a drag without saving.
+Endpoint-local Chrome preferences keep at most 512 canonical lane keys, each at most 1,024 UTF-8 bytes.
+New lanes append in canonical-key order. Filtering and folding never rewrite that order.
+Only a complete, connected roster with settled source listings can prune missing keys.
+Loading, failed listings, checkout caps, and account searches preserve absent saved keys.
+Account searches list issues, not repository membership, so they cannot prove repository removal.
+The existing preferences worker saves complete Chrome state and publishes one revision-tagged result.
+A late load yields to a user reorder. Save failure keeps the local order and shows an unsaved notice.
+Restart restores order, not selection or drag state. Lane operations send no tracker mutation.
+Done combines settled active records with the separate bounded history samples.
+Forgejo repository and account samples appear with a short coverage line in each lane's info column.
+The lane hint explains update-time sampling, the cutoff, last success, and account-wide limits.
+A failed history read keeps the last successful cards and shows a failure, independently of active status.
+GitHub still shows only loaded settled records; its missing history reader is named in the board notice.
+A future GitHub reader uses the same snapshot path without a board-specific adapter.
+Responses and hints expose no provider errors or credentials.
+
+| Record | Column |
+| --- | --- |
+| Open GitHub or Forgejo issue, neither workflow label | Open |
+| Open issue, only the progress label | In progress |
+| Open issue, only the review label | In review |
+| Natively closed issue | Done, regardless of labels |
+| Draft pull request | In progress |
+| Open non-draft pull request | In review |
+| Merged or closed pull request | Done |
+
+Both workflow labels place an open issue in Open with a conflict warning.
+Unknown native states also use Open with a warning.
+Incomplete or unknown label sets cannot prove absence: open issues remain Open.
+Pull requests always remain read-only. Done means settled, not implemented or merged.
+Runs, branches, assignees, and checks never select a column.
+
+`WorkflowFacts` carries optional native-state provenance, label completeness, and settlement time.
+The facts must belong to the same observation as their `Item`.
+Old cached records lack these facts and remain read-only until refreshed.
+Even complete facts provide only `PreflightRequired`, never write approval or proof of permissions.
+The current GitHub reader's bounded labels do not prove completeness.
+Forgejo history stores tracker provenance and available settlement times with each observation.
+GitHub history and complete active-label evidence remain later parts.
+
+Lanes identify tracker repositories, including repositories found only by Forgejo account search.
+GitLab, Beads, and Azure have no board lanes; their other views remain unchanged.
+GitHub and Forgejo lane identity compares host and repository without ASCII case.
+This matches GitHub repository comparison and the existing Forgejo account view.
+The selected card keeps its original `ItemKey` and caller-owned worker route, including its generation.
+Checkout repositories take precedence over account rows, even when a checkout has no matching item.
+No account collection key becomes a repository lane. No stored item key changes.
+`SourceKey::from_str` remains general for all providers and reuses the existing escaping format.
+
+The GUI configuration and hot reload validate these `[kanban]` settings:
+
+```toml
+[kanban]
+in_progress_label = "status: in-progress"
+in_review_label = "status: in-review"
+
+[[kanban.sources]]
+source = "forgejo:forgejo.example.test:team/app"
+in_progress_label = "workflow-active"
+in_review_label = "workflow-review"
+```
+
+Validation permits at most 128 overrides and 128 UTF-8 bytes per label.
+Names must be nonempty and distinct, including ASCII case variants.
+Commas and control characters are refused.
+Selectors must round-trip canonically and name a supported tracker repository.
+Duplicate repositories, including GitHub and Forgejo case aliases, are refused.
+An override matches the concrete source's exact canonical key, not a display label.
+Use the existing `config get|set|unset|check` commands.
+`config set kanban.sources` replaces the complete validated TOML array of inline tables.
+Dotted keys set scalar defaults, not individual array entries.
+Invalid settings leave the stored overrides unchanged.
+
+Projection keeps empty known repositories and accepts cached snapshots from failed sources.
+It filters after source deduplication and before display caps.
+Canonical ordering bounds display to 128 lanes, 100 cards per cell, and 2,000 cards overall.
+Coverage reports loaded, matching, and displayed totals separately; tracker-wide totals remain unknown.
+Truncation means a display cap hid matching records, not that the tracker backlog was fully read.
+Projection never trims the shared snapshots or infers closure from a missing record.
+History samples and their independent freshness travel through the existing latest-state mailbox.
+Background preparation merges observations by identity, preserving known opens over older closed copies.
+A newer closed copy overrides an open observation only with native tracker evidence.
+History-only updates retain scroll handles, selection, collapsed lanes, and the open popup.
+
+`orchestrator board [--cursor CURSOR]` reads this projection even while it is hidden.
+Preparation is lazy; exit 4 means pending or restart-required. An empty prepared board succeeds.
+Each page has at most 100 cards and 192 KiB of encoded JSON, including metadata and the response envelope.
+Lane metadata is paged too. Oversized titles end with `...` and carry the `title_truncated` warning code.
+Details and accessible names retain the complete cached title. A wire packing refusal does not remove the GUI board.
+The cursor binds the window, projection revision, and page offset.
+A stale cursor requests a restart; malformed or oversized cursors refuse.
+The transport ceiling remains 256 KiB. Responses omit descriptions, credentials, and raw provider errors.
+
+## Move planning and confirmation boundary
+
+`kanban/moves.rs` prepares exact issue moves from a fresh tracker read.
+A plan binds the host-qualified card, original lane, destination, native state,
+the complete label membership, resolved workflow label IDs, account, API route, and board/source/mapping generations.
+Preflight creates no label definition and sends no mutation.
+It refuses cross-lane proposals, pull requests, incomplete evidence, unsafe label definitions,
+and unknown native states. A same-column proposal does nothing unless it resolves a visible conflict.
+Only configured workflow label deltas are planned. Native state changes run last.
+Mutations leave unrelated labels and all other issue fields unchanged.
+Changed label membership invalidates approval; label order does not.
+GitHub plans bind `github.com` cards to `https://api.github.com/graphql`.
+Forgejo plans require the API authority to match the card's tracker authority.
+
+`ConfirmedMove` has private fields and cannot be cloned or deserialized.
+This part has no production constructor, provider writer, or move wire request.
+Its consuming submit method checks lifecycle admission before executing; there is no separate public executor.
+The module keeps the gate permit until it publishes the result.
+A later native dialog supplies the production confirmation constructor.
+The CLI and drag payloads cannot carry approval, `yes`, or `force`.
+Control protocol version remains 21.
+
+`service/kanban/moves.rs` uses the existing short-lived action threads and shared worker action limit.
+One bounded app-wide `MoveGate` excludes concurrent operations on the same tracker card across windows.
+The gate holds only in-flight identities. It holds no provider, credential, or service.
+Preparation is cancellable. Once accepted, a mutation can finish after its view closes.
+Every callback retains the approved route; no fallback account or source is selected.
+Immediately before mutation, a fresh read must match the exact approval inputs.
+Changed inputs require another plan and native confirmation.
+
+An attempted operation sends each delta once and stops on its first refused or ambiguous reply.
+It always re-reads the exact item and invalidates the source for normal sync.
+Definite refusal, partial success, unknown outcome, verified success, and a differing observation remain distinct.
+A lost response stays unknown even when a later read supplies an observed position.
+There is no automatic retry, compensation, replay, or rollback.
+These APIs cannot eliminate a tracker change between the final read and mutation.
+
+Per-card status and observations survive coalesced snapshots independently of notices.
+At admission capacity, the oldest terminal entry retires to admit another card; active callbacks never retire.
+Settled move observations share the history cutoff and newest-100-per-source board limit.
+Expiry removes board membership without deleting the retained action outcome.
+Only observed records change board positions; a requested destination never changes cached data.
+Source incarnations, operation IDs, and read epochs reject late results and older syncs.
+Missing rows do not prove closure. Current active readers without complete label facts retain unknown evidence.
+A later tracker observation can replace a retained item without replacing the recorded action outcome.
+Source replacement discards unconfirmed plans and fences results from already accepted threads.
+Provider adapters and the dialog must configure contexts before admitting moves.
+Forgejo account workers share these lifecycle hooks but still expose no production write path.
+
+## Bounded Done history
+
+Schema 4 adds `kanban_history_samples`, `kanban_history`, and `kanban_history_facts`.
+The migration creates tables in one transaction and leaves existing rows and keys unchanged.
+It preserves active items, checkpoints, runs, events, sessions, and ownership.
+History never replaces `issues` or `source_checkpoints`.
+
+`kanban/history.rs` validates complete page sets before they become replaceable samples.
+Each repository keeps at most 100 settled records updated within the last 30 days.
+This is a sample by update time, not a closure archive.
+An older closure with a recent comment can qualify.
+Forgejo account samples use the existing account database and an explicit account collection key.
+They accept at most 200 input records across the account and retain at most 100 per repository.
+Items keep their source-qualified keys, including the original host and repository spelling.
+History collections compare hosts and repositories without case, using the board's lane identity rule.
+Loading selects the newest sample across old case aliases; writable caches consolidate those aliases transactionally.
+
+A successful capped read replaces only its history sample and marks its coverage truncated.
+Failed or incomplete reads keep the previous sample and its success time.
+A transaction stores the sample, optional versioned workflow facts, and coverage together.
+A cache-write failure rolls back the sample and leaves active data usable.
+History cache failures have a separate snapshot error; they do not fail active reads.
+Known newer open observations remove older settled copies, including case aliases and capped active listings.
+These removals persist without replacing active rows or checkpoints.
+Reloads retain removals made by another worker even when the sample's success time does not change.
+A newer schema retains those removals in memory without writing its cache.
+Missing active rows never become Done.
+Expiry removes only history and its facts, never a live item or run.
+
+`Snapshot::history` carries each collection's cutoff, last success, limit, truncation,
+cached/live origin, and latest failure independently of active source status.
+`Snapshot::board_records` combines immutable active and history observations by identity and freshness.
+It does not change the shared active listing or treat stale closed copies as reopened cards.
+A newer schema refuses every history write and keeps fresh observations in memory.
+Its snapshot still reports the real observation time and live origin.
+Stored facts become cached tracker evidence when read again; absent facts stay unknown.
+
+`service/kanban.rs` uses the existing worker tick, without another thread or timer service.
+History is due every 300 seconds while visible and 600 seconds while hidden.
+Active repository sync remains 60 seconds; remote account sync remains 300 seconds while visible.
+Provider failures and requested delays can pause both reads; local cache and validation failures delay history only.
+Refresh makes history due without bypassing its retry or provider delay.
+Forgejo repository and account hooks read recent settled observations on this schedule.
+The GitHub hook still reports unsupported, not an empty successful read.
+Control protocol version 21 reports per-lane history coverage, separate from active-source freshness.
 
 ## Branches name their item
 
@@ -420,6 +630,33 @@ opens the issue's web page as any row's does. `sheprd orchestrator issues
 token for it, nothing is added. The host must be a bare host or `host:port`:
 an account on an instance served under a folder is not read, and its project
 shows the `HostPath` error.
+
+**Recent history.** `forgejo/history.rs` fills the separate schema-4 history cache.
+Repository issues use `state=closed&type=issues&since=<cutoff>&sort=recentupdate&limit=50`.
+Closed pull requests use `state=closed&sort=recentupdate&limit=50`.
+Each feed admits at most 100 records, normally two full pages.
+The combined sample retains the newest 100 eligible records by update time.
+Pull requests preserve merged versus closed state and their available settlement timestamps.
+Repository addresses preserve the instance's path prefix.
+
+Account history uses the existing search endpoint with the closed-issue query, not repository discovery.
+It admits at most 200 observations across the account and retains at most 100 per repository.
+The account collection's coverage carries the shared limit and truncation for every contributing lane.
+Each item retains its own repository identity; the collection key is never a lane.
+The account's existing path-host refusal and HTTPS-only token routing still apply.
+
+Both readers apply the 30-day cutoff locally and share the existing response-byte and timeout limits.
+Smaller server pages continue using `X-Total-Count`; without a count, a short page alone proves nothing.
+The query limit stays fixed so page offsets cannot change during a read.
+Readers stop before another server-sized page could exceed admission, so small pages can underfill a cap.
+An empty page or an ordered pull-request cutoff crossing ends that read.
+Both repository feeds share a ten-page budget; account history has its own ten-page budget.
+Reaching an intentional record cap produces truncated coverage and replaces only the history sample.
+Missing or failed pages, repeated identities, changed or contradictory totals, oversized pages,
+ignored issue filters, unordered updates, or budget exhaustion below the cap refuse the new sample.
+The worker retains the previous sample and exposes the failed attempt separately from active-source status.
+Known open observations remove older closed copies without replacing the active collection.
+These reads send no tracker writes and introduce no schema migration.
 
 Left out for now: writing to Forgejo (merge, review, comments), the Mine
 filter, the title bar's pull request card, avatars, the new worktree dialog's

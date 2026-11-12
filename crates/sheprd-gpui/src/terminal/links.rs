@@ -12,6 +12,7 @@ use super::{
 use sheprd_client::protocol::{CellData, FrameData, PaneSurfaceFrame};
 use std::ops::Range;
 
+mod broken;
 mod external;
 mod path;
 mod wrap;
@@ -353,6 +354,11 @@ fn frame_link(
             continued: Vec::new(),
         });
     }
+    // A web address that the program itself broke over rows, which no wrap
+    // flag marks, is read here: the daemon reads only its first row.
+    if let Some(link) = broken::address(frame, row, source, columns.clone(), rows.clone()) {
+        return Some(link);
+    }
     // Most rows end their line before the right edge and are read alone;
     // text under the point that a neighbouring row may continue is read with
     // the rows it may span, as one line.
@@ -372,7 +378,8 @@ fn frame_link(
     // fill it, so text read across rows is a link only where the disk
     // confirms it: a file, which is one only once it is found. A web address
     // the terminal wrapped is the daemon's to read (`pane.link.resolve`),
-    // from the terminal's own wrap flags.
+    // from the terminal's own wrap flags; one the program broke itself was
+    // read above (`broken::address`).
     if segments.len() > 1 && !matches!(target, RowTarget::Path { .. }) {
         return None;
     }

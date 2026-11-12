@@ -156,6 +156,10 @@ pub(super) fn orchestrator(
     context: &Context,
 ) -> crate::Result<Output> {
     match command {
+        OrchestratorCommand::Board { cursor } => super::kanban::read(cursor, context),
+        OrchestratorCommand::BoardOrder { lane, before } => {
+            super::kanban::order(lane, before, context)
+        }
         OrchestratorCommand::Open { repo } => {
             let repo = repo.as_deref().map(local_folder).transpose()?;
             let response = context.call(Request::Tab, TabOp::Orchestrator { repo })?;

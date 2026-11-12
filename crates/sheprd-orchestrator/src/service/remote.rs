@@ -258,6 +258,7 @@ impl Service {
             .name("herdr-orchestrator-remote".into())
             .spawn(move || worker.run(&receiver))?;
         Ok(Self {
+            moves: super::Moves::new(super::kanban::moves::shared_gate(), Arc::default()),
             commands,
             mailbox,
             notices,

@@ -20,7 +20,9 @@ use std::{
 };
 
 /// The newest schema this build reads and writes.
-pub const SCHEMA_VERSION: i64 = 3;
+pub const SCHEMA_VERSION: i64 = 4;
+
+mod kanban;
 
 /// How long a write waits for the other application's transaction.
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
@@ -256,6 +258,10 @@ impl Store {
             params![key, encode("checkpoint_json", checkpoint)?],
         )?;
         transaction.commit()?;
+        // History maintenance cannot turn a successful active read into a failure.
+        if let Err(error) = self.expire_history(Utc::now()) {
+            tracing::warn!(%error, "Cannot reconcile cached history after active sync");
+        }
         Ok(())
     }
 
@@ -570,6 +576,9 @@ fn migrate(connection: &mut Connection) -> Result<Access> {
                 transaction.execute(&format!("ALTER TABLE issues ADD COLUMN {column} TEXT"), [])?;
             }
         }
+    }
+    if version < 4 {
+        transaction.execute_batch(kanban::SCHEMA_V4)?;
     }
     if version < SCHEMA_VERSION {
         transaction.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION}"))?;

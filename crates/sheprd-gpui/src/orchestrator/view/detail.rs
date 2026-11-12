@@ -27,17 +27,21 @@ impl OrchestratorView {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let Some(item) = self.item(&detail.key).cloned() else {
-            self.detail = None;
+        let item = if self.kanban.shown {
+            self.kanban_detail_item(&detail.key)
+        } else {
+            self.item(&detail.key)
+        };
+        let Some(item) = item.cloned() else {
+            if !self.kanban.shown {
+                self.detail = None;
+            }
             return div().into_any_element();
         };
-        let runs = Runs::new(&self.snapshot().runs, &self.snapshot().sessions, &self.live);
-        let item_runs = runs.of_item(&detail.key);
-        let body = match detail.tab {
-            // The status box leads the item's first page: the conversation
-            // for a pull request, the description for an issue.
-            DetailTab::Description => div()
-                .id("orchestrator-description-page")
+        let mut run_count = 0;
+        let body = if self.kanban.shown {
+            div()
+                .id("kanban-description")
                 .flex_1()
                 .min_h_0()
                 .overflow_y_scroll()
@@ -45,39 +49,67 @@ impl OrchestratorView {
                 .flex()
                 .flex_col()
                 .gap_4()
-                .when(item.github_pull_request().is_none(), |el| {
-                    el.child(self.render_status_box(&item, &runs, &item_runs, cx))
-                })
+                .child(self.render_tags(&item))
+                .child(self.detail_title(&item))
+                .child(self.kanban_detail_metadata())
                 .child(self.render_meta(&item))
-                .when(item.key.source.provider == Provider::Beads, |el| {
-                    el.child(self.render_task_facts(&item, cx))
-                })
                 .child(self.render_description(&item))
-                .into_any_element(),
-            DetailTab::Conversation => div()
-                .flex_1()
-                .min_h_0()
-                .flex()
-                .flex_col()
-                .child(
-                    div()
-                        .flex_none()
-                        .px_4()
-                        .pt_4()
-                        .child(self.render_status_box(&item, &runs, &item_runs, cx)),
+                .children(
+                    item.activity
+                        .and_then(|activity| activity.comments)
+                        .map(|comments| self.look.muted(fl!("kanban-comments", count = comments))),
                 )
-                .child(self.render_conversation(cx))
-                .into_any_element(),
-            DetailTab::Agent => self.render_runs(&runs, &item_runs, cx),
-            DetailTab::Details => self.render_details(&item, cx),
-            DetailTab::Checks => self.render_checks(&item),
+                .into_any_element()
+        } else {
+            let runs = Runs::new(&self.snapshot().runs, &self.snapshot().sessions, &self.live);
+            let item_runs = runs.of_item(&detail.key);
+            run_count = item_runs.len();
+            match detail.tab {
+                // The status box leads the item's first page: the conversation
+                // for a pull request, the description for an issue.
+                DetailTab::Description => div()
+                    .id("orchestrator-description-page")
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .p_4()
+                    .flex()
+                    .flex_col()
+                    .gap_4()
+                    .when(item.github_pull_request().is_none(), |el| {
+                        el.child(self.render_status_box(&item, &runs, &item_runs, cx))
+                    })
+                    .child(self.render_meta(&item))
+                    .when(item.key.source.provider == Provider::Beads, |el| {
+                        el.child(self.render_task_facts(&item, cx))
+                    })
+                    .child(self.render_description(&item))
+                    .into_any_element(),
+                DetailTab::Conversation => div()
+                    .flex_1()
+                    .min_h_0()
+                    .flex()
+                    .flex_col()
+                    .child(
+                        div()
+                            .flex_none()
+                            .px_4()
+                            .pt_4()
+                            .child(self.render_status_box(&item, &runs, &item_runs, cx)),
+                    )
+                    .child(self.render_conversation(cx))
+                    .into_any_element(),
+                DetailTab::Agent => self.render_runs(&runs, &item_runs, cx),
+                DetailTab::Details => self.render_details(&item, cx),
+                DetailTab::Checks => self.render_checks(&item),
+            }
         };
         div()
             .flex_1()
             .min_h_0()
             .flex()
             .flex_col()
-            .child(self.render_detail_header(&item, detail.tab, item_runs.len(), cx))
+            .child(self.render_detail_header(&item, detail.tab, run_count, cx))
             .child(body)
             .into_any_element()
     }
@@ -102,7 +134,11 @@ impl OrchestratorView {
             }
             None => (fl!("orchestrator-issues"), "icons/note.svg", Tab::Issues),
         };
-        let repo = super::tasks::task_project(item)
+        let repo = self
+            .kanban
+            .shown
+            .then(|| item.key.source.repository.clone())
+            .or_else(|| super::tasks::task_project(item))
             .or_else(|| {
                 let info = self.snapshot().repo.as_ref()?;
                 let remote = info.remote.as_ref()?;
@@ -124,66 +160,84 @@ impl OrchestratorView {
                     .flex()
                     .items_center()
                     .gap_2()
+                    .min_w_0()
                     .child(
                         self.breadcrumbs(&repo, list, list_icon, list_tab, item, cx)
                             .flex_1(),
                     )
                     .child(self.stepper(item, cx)),
             )
-            .child(
-                div()
-                    .px_1()
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .child(self.render_tags(item))
-                    .child(
-                        div()
-                            .debug_selector(|| "orchestrator-detail-title".into())
-                            .text_size(px(look.ui.size + 4.))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child(item.title.clone()),
-                    ),
-            )
-            .child(div().px_1().pt_1().flex().gap_4().children(
-                DetailTab::tabs(pull_request).iter().copied().map(|tab| {
-                    let on = tab == active;
-                    let label = match tab {
-                        DetailTab::Agent if runs > 0 => format!("{}  {runs}", tab.label()),
-                        _ => tab.label(),
-                    };
+            .when(!self.kanban.shown, |el| {
+                el.child(
                     div()
-                        .id(SharedString::from(format!("orchestrator-detail-{tab:?}")))
-                        .debug_selector(move || format!("orchestrator-tab-{tab:?}"))
-                        .pb_2()
-                        .border_b_2()
-                        .border_color(rgb(if on {
-                            theme.primary()
-                        } else {
-                            theme.background
-                        }))
-                        .cursor_pointer()
-                        .text_color(rgb(if on { theme.foreground } else { theme.muted }))
-                        .child(label)
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            if let Some(detail) = &mut this.detail {
-                                detail.tab = tab;
-                            }
-                            this.merge_open = false;
-                            this.follow_pull_request();
-                            cx.notify();
-                        }))
-                }),
-            ))
+                        .px_1()
+                        .flex()
+                        .flex_col()
+                        .gap_2()
+                        .child(self.render_tags(item))
+                        .child(self.detail_title(item)),
+                )
+            })
+            .child(
+                div().px_1().pt_1().flex().gap_4().children(
+                    (if self.kanban.shown {
+                        &[]
+                    } else {
+                        DetailTab::tabs(pull_request)
+                    })
+                    .iter()
+                    .copied()
+                    .map(|tab| {
+                        let on = tab == active;
+                        let label = match tab {
+                            DetailTab::Agent if runs > 0 => format!("{}  {runs}", tab.label()),
+                            _ => tab.label(),
+                        };
+                        div()
+                            .id(SharedString::from(format!("orchestrator-detail-{tab:?}")))
+                            .debug_selector(move || format!("orchestrator-tab-{tab:?}"))
+                            .pb_2()
+                            .border_b_2()
+                            .border_color(rgb(if on {
+                                theme.primary()
+                            } else {
+                                theme.background
+                            }))
+                            .cursor_pointer()
+                            .text_color(rgb(if on { theme.foreground } else { theme.muted }))
+                            .child(label)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                if let Some(detail) = &mut this.detail {
+                                    detail.tab = tab;
+                                }
+                                this.merge_open = false;
+                                this.follow_pull_request();
+                                cx.notify();
+                            }))
+                    }),
+                ),
+            )
+    }
+
+    fn detail_title(&self, item: &Item) -> Div {
+        div()
+            .debug_selector(|| "orchestrator-detail-title".into())
+            .text_size(px(self.look.ui.size + 4.))
+            .font_weight(FontWeight::SEMIBOLD)
+            .child(item.title.clone())
     }
 
     /// Where the item sits in the list, stepping to its neighbors, the
     /// item on the web, and close.
     fn stepper(&self, item: &Item, cx: &mut Context<Self>) -> Div {
         let look = &self.look;
-        let keys = self.keys();
         let key = item.key.canonical();
-        let at = keys.iter().position(|listed| *listed == key);
+        let (at, count) = if self.kanban.shown {
+            self.kanban.detail_position(&key)
+        } else {
+            let keys = self.keys();
+            (keys.iter().position(|listed| *listed == key), keys.len())
+        };
         let url = item.url.clone();
         div()
             .flex_none()
@@ -193,11 +247,9 @@ impl OrchestratorView {
             .text_size(look.small())
             .text_color(rgb(look.theme.muted))
             .children(at.map(|at| {
-                div().pr_1().child(fl!(
-                    "orchestrator-position",
-                    at = at + 1,
-                    count = keys.len()
-                ))
+                div()
+                    .pr_1()
+                    .child(fl!("orchestrator-position", at = at + 1, count = count))
             }))
             .child(
                 look.icon_button(
@@ -236,16 +288,24 @@ impl OrchestratorView {
                     fl!("orchestrator-close-details"),
                 )
                 .debug_selector(|| "orchestrator-detail-close".into())
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.detail = None;
-                    this.merge_open = false;
-                    cx.notify();
+                .on_click(cx.listener(|this, _, window, cx| {
+                    if this.kanban.shown {
+                        this.close_kanban_popup(window, cx);
+                    } else {
+                        this.detail = None;
+                        this.merge_open = false;
+                        cx.notify();
+                    }
                 })),
             )
     }
 
     /// Opens the item `by` rows away from the open one in the shown list.
     pub(super) fn step_detail(&mut self, by: isize, cx: &mut Context<Self>) {
+        if self.kanban.shown {
+            self.step_kanban_detail(by, cx);
+            return;
+        }
         let keys = self.keys();
         let Some(at) = self
             .detail
@@ -347,9 +407,13 @@ impl OrchestratorView {
                     "icons/arrow-left.svg",
                     fl!("orchestrator-back"),
                 )
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.detail = None;
-                    cx.notify();
+                .on_click(cx.listener(|this, _, window, cx| {
+                    if this.kanban.shown {
+                        this.close_kanban_popup(window, cx);
+                    } else {
+                        this.detail = None;
+                        cx.notify();
+                    }
                 })),
             )
             .child(
@@ -358,7 +422,11 @@ impl OrchestratorView {
                     source_icon(item.key.source.provider),
                     repo.to_owned(),
                 )
-                .on_click(cx.listener(|this, _, _, cx| {
+                .on_click(cx.listener(|this, _, window, cx| {
+                    if this.kanban.shown {
+                        this.close_kanban_popup(window, cx);
+                        return;
+                    }
                     this.detail = None;
                     let list = match this.tab {
                         Tab::Tasks => Tab::Tasks,
@@ -370,9 +438,13 @@ impl OrchestratorView {
             .child(separator())
             .child(
                 step("orchestrator-crumb-list", list_icon, list.to_owned()).on_click(cx.listener(
-                    move |this, _, _, cx| {
-                        this.detail = None;
-                        this.select_tab(list_tab, cx);
+                    move |this, _, window, cx| {
+                        if this.kanban.shown {
+                            this.close_kanban_popup(window, cx);
+                        } else {
+                            this.detail = None;
+                            this.select_tab(list_tab, cx);
+                        }
                     },
                 )),
             )

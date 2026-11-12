@@ -40,3 +40,12 @@ browser-tab-review = Review · { $branch }
 browser-tab-orchestrator = Orchestrator · { $repo }
 browser-tab-devices = Devices
 browser-tab-terminal = Terminal
+
+## The bar above a local file, and its switch between page and source.
+browser-file-rendered = Rendered
+browser-file-source = Source
+browser-file-show-source = Show Source
+browser-file-unsupported = This build cannot render pages in the window. The file's source can be shown.
+browser-file-no-switch = No Markdown or HTML file is in view
+browser-file-source-only-build = Source only: this build cannot render pages in the window.
+browser-file-source-only-folder = Source only: a page is never served from a hidden folder, or from your home folder itself.

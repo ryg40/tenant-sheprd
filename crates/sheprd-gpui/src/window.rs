@@ -36,14 +36,16 @@ mod links;
 mod monitors;
 pub(crate) use links::PressedLink;
 mod mouse;
+mod notices;
+pub(crate) use notices::NoticeCard;
 mod pending_input;
 mod plugin_selection;
 pub(crate) mod prefix;
 mod reconnecting;
 mod regions;
 mod render;
-pub(crate) use render::NoticeCard;
 mod report_issue;
+pub(crate) mod right_columns;
 mod select_hint;
 mod selection;
 mod server_keys;
@@ -213,6 +215,10 @@ pub(crate) struct SheprdWindow {
     /// dialog so the lanes can be compared later.
     pub(crate) fan_out: Option<crate::fan_out::FanOut>,
     pub(crate) file_transfer: Option<transfers::FileTransfer>,
+    /// The file explorer on the window's right; see `crate::file_tree`.
+    pub(crate) file_tree: crate::file_tree::FileTree,
+    /// The file explorer's width, kept for the session.
+    pub(crate) file_tree_width: crate::panel_resize::PanelWidth,
     /// The find bar, over the pane it searches.
     pub(crate) find: Option<find::FindBar>,
     /// How the find bar was left over each pane, to bring it back there.
@@ -239,6 +245,7 @@ pub(crate) struct SheprdWindow {
     pub(crate) input_probe: smoke::InputProbe,
     pub(crate) install_warning_shown: bool,
     pub(crate) integrations: crate::integrations::Integrations,
+    pub(crate) kanban_order: crate::orchestrator::view::kanban::order::Stored,
     /// What a key code types in the active layout, to restore a dropped Shift.
     pub(crate) key_layout: fn(u16) -> Option<prefix::KeyChars>,
     /// The key code and Shift of the key being handled, from AppKit's event.
@@ -428,6 +435,7 @@ pub(crate) struct SheprdWindow {
     pub(crate) viewport_width: f32,
     /// Tells a sleep from the clocks, so connections are checked on waking.
     pub(crate) wake: endpoint::WakeClock,
+    pub(crate) walkr: crate::walkr::Walkr,
     pub(crate) wheel: WheelAccumulator,
     /// A press on a workspace row that may lift it for reordering.
     pub(crate) workspace_drag: Option<sidebar::WorkspaceDrag>,
@@ -527,9 +535,14 @@ impl SheprdWindow {
 
     /// Stored chrome yields to anything changed before it arrived. A stored
     /// sort is a past toggle, so it overrides the daemon's from then on.
-    pub(crate) fn apply_stored_chrome(&mut self, chrome: preferences::Chrome) {
-        let resave = self
-            .activity
+    pub(crate) fn apply_stored_chrome(&mut self, loaded: crate::Result<preferences::Chrome>) {
+        let Ok(chrome) = loaded else {
+            // Unknown disk contents are not defaults. Keep all automatic saves fenced.
+            self.kanban_order.failed.set(true);
+            return;
+        };
+        let stored = chrome.clone();
+        self.activity
             .restore(chrome.activity_panel, &chrome.activity_last_opened);
         if !self.sidebar_modified {
             self.sidebar_width = chrome.sidebar_width;
@@ -557,8 +570,9 @@ impl SheprdWindow {
             self.agent_sort = sort;
             self.agent_sort_modified = true;
         }
-        // Saved once the whole chrome is merged, so the save keeps it all.
-        if resave {
+        self.kanban_order.restore(chrome.kanban_lane_order);
+        // Only save a changed, fully merged snapshot, never an unknown/default fallback.
+        if self.chrome() != stored {
             self.save_chrome();
         }
     }
@@ -587,6 +601,20 @@ impl SheprdWindow {
         }
         if let Some(chrome) = self.sidebar_preferences.as_mut().and_then(|p| p.loaded()) {
             self.apply_stored_chrome(chrome);
+            cx.notify();
+        }
+        if let Some(saved) = self.sidebar_preferences.as_ref().and_then(|p| p.saved())
+            && self
+                .kanban_order
+                .pending
+                .get()
+                .is_some_and(|revision| saved.revision >= revision)
+        {
+            self.kanban_order.pending.set(None);
+            self.kanban_order.failed.set(saved.result.is_err());
+            if saved.result.is_ok() {
+                self.kanban_order.unsaved.set(false);
+            }
             cx.notify();
         }
         let old_pane = self
@@ -650,6 +678,10 @@ impl SheprdWindow {
         self.sync_host_theme();
         self.save_group_layouts(cx);
         self.poll_browser(window, cx);
+        self.poll_file_tree(cx);
+        if self.update_file_tree() {
+            cx.notify();
+        }
         self.poll_remote_browser(window, cx);
         self.poll_chats(window, cx);
         self.offer_browser_skill(window, cx);
@@ -743,6 +775,9 @@ impl SheprdWindow {
             cx.notify();
         }
         if self.update_local_ports() {
+            cx.notify();
+        }
+        if self.update_walkr(cx) {
             cx.notify();
         }
         #[cfg(feature = "azure")]

@@ -45,10 +45,10 @@ pub(crate) struct Pages {
     /// The pages being built, outside the App's borrow. Only Windows builds
     /// pages that way; see `super::building`.
     building: HashMap<TabId, Build>,
-    /// Numbers each build, so a build's page is kept only while it is still
-    /// its tab's latest build.
-    #[cfg_attr(not(windows), allow(dead_code))]
+    /// Numbers page instances, including asynchronous Windows builds.
     builds: u64,
+    /// Only reports from this instance may change the Walkr section.
+    walkr: Option<u64>,
     shown: Vec<TabId>,
     /// Where each page drew in the frame being drawn.
     drawn: Drawn,
@@ -79,6 +79,7 @@ impl Default for Pages {
             pages: HashMap::new(),
             building: HashMap::new(),
             builds: 0,
+            walkr: None,
             shown: Vec::new(),
             drawn: Drawn::default(),
             outbox: Outbox {
@@ -184,7 +185,14 @@ fn new_window(
                     Err(_) => wry::NewWindowResponse::Deny,
                 };
             }
-            Err(error) => tracing::debug!(%error, "Cannot build a popup"),
+            Err(error) => {
+                if matches!(opener, Source::Walkr(_)) {
+                    let error = crate::walkr::Error::PageConstruction(Box::new(error));
+                    tracing::debug!(%error, "Cannot build a Walkr popup");
+                } else {
+                    tracing::debug!(%error, "Cannot build a popup");
+                }
+            }
         }
     }
     #[cfg(not(target_os = "macos"))]
@@ -255,24 +263,8 @@ impl Pages {
         cx: &mut Context<SheprdWindow>,
     ) -> crate::Result<()> {
         // A review tab is drawn by the app; only pages get a web view.
-        let Some(location) = tab
-            .location
-            .as_ref()
-            .filter(|location| location.is_page())
-            .filter(|_| !self.pages.contains_key(&tab.id) && !self.is_building(tab.id))
-        else {
+        let Some(location) = tab.location.as_ref().filter(|location| location.is_page()) else {
             return Ok(());
-        };
-        let id = tab.id;
-        let posted = self.outbox.sender.clone();
-        let preview = match &self.preview {
-            Some(preview) => preview.clone(),
-            None => {
-                let preview = Rc::new(Preview::start()?);
-                preview.set_theme(self.theme.1.clone());
-                self.preview = Some(preview.clone());
-                preview
-            }
         };
         // The folder this page may read. A web page gets none, and a page
         // keeps the folder it was created with wherever it navigates.
@@ -285,15 +277,64 @@ impl Pages {
             | Location::Devices
             | Location::CoreTerminal { .. } => None,
         };
+        self.make(tab.id, location.page_url(), root, window, cx)
+    }
+
+    /// Creates the Walkr section's page at `address` if the window has none
+    /// and builds none. No tab stands for it: a tab's `Debug` would hold the
+    /// whole address.
+    pub(crate) fn ensure_walkr(
+        &mut self,
+        address: &crate::walkr::run::Address,
+        window: &mut Window,
+        cx: &mut Context<SheprdWindow>,
+    ) -> crate::Result<()> {
+        self.make(TabId::WALKR, address.expose().to_owned(), None, window, cx)
+            .map_err(|error| crate::walkr::Error::PageConstruction(Box::new(error)).into())
+    }
+
+    /// Creates tab `id`'s page at `url`, unless the window has it or builds
+    /// it.
+    fn make(
+        &mut self,
+        id: TabId,
+        url: String,
+        root: Option<std::path::PathBuf>,
+        window: &mut Window,
+        cx: &mut Context<SheprdWindow>,
+    ) -> crate::Result<()> {
+        if self.pages.contains_key(&id) || self.is_building(id) {
+            return Ok(());
+        }
+        let posted = self.outbox.sender.clone();
+        let preview = match &self.preview {
+            Some(preview) => preview.clone(),
+            None => {
+                let preview = Rc::new(Preview::start()?);
+                preview.set_theme(self.theme.1.clone());
+                self.preview = Some(preview.clone());
+                preview
+            }
+        };
         // Only a local page, which the agent wrote, gets `herdr.send`.
         let bridge = if root.is_some() {
             super::annotate::BRIDGE
         } else {
             ""
         };
-        let builder = with_handlers(wry::WebViewBuilder::new(), Source::Tab(id), &self.outbox)
+        self.builds += 1;
+        let source = if id == TabId::WALKR {
+            self.walkr = Some(self.builds);
+            Source::Walkr(self.builds)
+        } else {
+            Source::Tab(id)
+        };
+        let builder = with_handlers(wry::WebViewBuilder::new(), source, &self.outbox)
             .with_initialization_script(bridge)
-            .with_url(location.page_url())
+            // The Walkr section's address may hold the secret of a run, so
+            // its page keeps nothing on disk: no history, cache, or cookies.
+            // Every other page keeps the shared profile.
+            .with_incognito(id == TabId::WALKR)
             .with_asynchronous_custom_protocol(
                 PREVIEW_SCHEME.into(),
                 move |_, request, responder| {
@@ -310,7 +351,7 @@ impl Pages {
                 let from = super::PostedFrom::of(&request.uri().to_string());
                 let body = request.into_body();
                 if body.len() <= MAX_POST_BYTES {
-                    report(&posted, Event::Posted(Source::Tab(id), body, from));
+                    report(&posted, Event::Posted(source, body, from));
                 }
             });
         // Window has an inherent `window_handle` of its own.
@@ -318,20 +359,26 @@ impl Pages {
         #[cfg(target_os = "macos")]
         {
             let _ = cx;
-            let view = builder.build_as_child(&handle)?;
+            let view = builder.with_url(url).build_as_child(&handle)?;
             super::page_keys::install();
             self.add(id, view, window)
         }
         #[cfg(windows)]
         {
             let _ = handle;
-            self.builds += 1;
+            // A retired async build must neither load its address nor cover
+            // the window. Only the accepted build receives the address.
+            let (builder, pending_url) = if id == TabId::WALKR {
+                (builder.with_visible(false).with_focused(false), Some(url))
+            } else {
+                (builder.with_url(url), None)
+            };
             let build = Build {
                 number: self.builds,
                 location: None,
             };
             self.building.insert(id, build);
-            super::building::start(id, self.builds, builder, window, cx);
+            super::building::start(id, self.builds, builder, pending_url, window, cx);
             Ok(())
         }
     }
@@ -352,12 +399,20 @@ impl Pages {
         Ok(())
     }
 
+    /// Whether build `number` still owns tab `id`'s pending page.
+    #[cfg(windows)]
+    pub(super) fn is_current_build(&self, id: TabId, number: u64) -> bool {
+        self.building
+            .get(&id)
+            .is_some_and(|build| build.number == number)
+    }
+
     /// Ends build `number` of tab `id`, returning it if its page is still
     /// wanted: a tab closed while its page was built wants none, and one
     /// built again since wants only the later page.
     #[cfg(windows)]
     pub(super) fn finish_building(&mut self, id: TabId, number: u64) -> Option<Build> {
-        if self.building.get(&id)?.number != number {
+        if !self.is_current_build(id, number) {
             return None;
         }
         self.building.remove(&id)
@@ -365,11 +420,13 @@ impl Pages {
 
     /// Serves `theme` to local pages from now on: a page picks it up when it
     /// next loads. Every page reports its light or dark at once. Cheap when
-    /// the colors did not change.
-    pub(crate) fn set_theme(&mut self, theme: &crate::config::Theme) {
+    /// the colors did not change. Returns whether they changed from an
+    /// earlier theme, so pages that hold the old colors want loading again.
+    pub(crate) fn set_theme(&mut self, theme: &crate::config::Theme) -> bool {
         let key = super::kit::theme_key(theme);
-        if self.theme.0 == key && !self.theme.1.is_empty() {
-            return;
+        let first = self.theme.1.is_empty();
+        if self.theme.0 == key && !first {
+            return false;
         }
         self.theme = (key, super::kit::theme_css(theme));
         if let Some(preview) = &self.preview {
@@ -382,6 +439,7 @@ impl Pages {
                 page.set_light(light);
             }
         }
+        !first
     }
 
     /// Hides tab `id`'s page. On macOS it also leaves the window's area,
@@ -466,6 +524,9 @@ impl Pages {
     }
 
     pub(crate) fn close(&mut self, id: TabId) {
+        if id == TabId::WALKR {
+            self.walkr = None;
+        }
         #[cfg(target_os = "macos")]
         {
             self.adopted.retain(|_, tab| *tab != id);
@@ -499,7 +560,12 @@ impl Pages {
         if let Some(page) = self.pages.get(&id)
             && let Err(error) = page.raw().load_url(&url)
         {
-            tracing::debug!(%error, "Browser navigation failed");
+            if id == TabId::WALKR {
+                let error = crate::walkr::Error::PageNavigation(error);
+                tracing::debug!(%error, "Walkr navigation failed");
+            } else {
+                tracing::debug!(%error, "Browser navigation failed");
+            }
         }
     }
 
@@ -540,7 +606,12 @@ impl Pages {
         if let Some(page) = self.pages.get(&id)
             && let Err(error) = page.raw().reload()
         {
-            tracing::debug!(%error, "Browser reload failed");
+            if id == TabId::WALKR {
+                let error = crate::walkr::Error::PageReload(error);
+                tracing::debug!(%error, "Walkr reload failed");
+            } else {
+                tracing::debug!(%error, "Browser reload failed");
+            }
         }
     }
 
@@ -580,6 +651,13 @@ impl Pages {
         }
     }
 
+    /// Whether the window sent tab `id`'s page input since this was last
+    /// asked. Never here: the system hands keys, the pointer, and the wheel
+    /// to a native view itself, and the window does not see them.
+    pub(crate) fn took_input(&self, _: TabId) -> bool {
+        false
+    }
+
     /// Hands the keyboard back from the page to the window.
     pub(crate) fn blur(&self, id: TabId) {
         if let Some(page) = self.pages.get(&id) {
@@ -600,6 +678,7 @@ impl Pages {
         while let Ok(event) = self.events.try_recv() {
             let resolved = event.resolve(|source| match source {
                 Source::Tab(id) => Some(id),
+                Source::Walkr(number) => (self.walkr == Some(number)).then_some(TabId::WALKR),
                 #[cfg(target_os = "macos")]
                 Source::Popup(key) => self.adopted.get(&key).copied(),
             });

@@ -43,11 +43,11 @@ pub(crate) struct Indexes {
 }
 
 impl Indexes {
-    fn get(&self, root: &Path) -> Option<&(Arc<Index>, Instant)> {
+    pub(crate) fn get(&self, root: &Path) -> Option<&(Arc<Index>, Instant)> {
         self.entries.iter().find(|(index, _)| index.root() == root)
     }
 
-    fn insert(&mut self, index: Arc<Index>, now: Instant) {
+    pub(crate) fn insert(&mut self, index: Arc<Index>, now: Instant) {
         self.entries.retain(|(kept, _)| kept.root() != index.root());
         self.entries.insert(0, (index, now));
         self.entries.truncate(CACHED);

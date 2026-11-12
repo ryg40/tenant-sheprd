@@ -14,6 +14,7 @@ mod detail;
 mod dispatch;
 mod hosts;
 mod inbox;
+pub(crate) mod kanban;
 mod list;
 mod listing;
 mod look;
@@ -167,6 +168,8 @@ pub(crate) struct OrchestratorView {
     /// Every repository listed, and the one the open item, the selection,
     /// and the dialogs belong to.
     repos: Vec<Repo>,
+    account_started: bool,
+    kanban: kanban::State,
     /// Non-project folders already checked; retried on Refresh or after removal.
     skipped_repos: HashSet<String>,
     active: usize,
@@ -241,6 +244,8 @@ pub(crate) struct OrchestratorView {
     /// The config's `[[agent_roles]]`, which the dispatch dialog offers.
     roles: Vec<super::role::Role>,
     _subscriptions: Vec<Subscription>,
+    #[cfg(test)]
+    action_sink: Option<std::sync::mpsc::SyncSender<super::Action>>,
 }
 
 impl OrchestratorView {
@@ -255,6 +260,7 @@ impl OrchestratorView {
         let subscription = cx.subscribe(&search, |this, search, _: &search_input::Changed, cx| {
             this.query = search.read(cx).text().to_owned();
             this.refresh_rows();
+            this.prepare_kanban(cx);
             cx.notify();
         });
         let message = cx.new(|cx| {
@@ -269,12 +275,10 @@ impl OrchestratorView {
             input.set_appearance(look.ui.clone(), look.theme.clone(), cx);
             input
         });
-        // Tests never read the login shell's FORGEJO_TOKEN.
-        if !cfg!(test) {
-            Self::find_forgejo_account(cx);
-        }
         Self {
             repos: Vec::new(),
+            account_started: false,
+            kanban: kanban::State::default(),
             skipped_repos: HashSet::new(),
             active: 0,
             blank: Snapshot::default(),
@@ -319,6 +323,8 @@ impl OrchestratorView {
             merge_open: false,
             hosts: Arc::default(),
             _subscriptions: vec![subscription],
+            #[cfg(test)]
+            action_sink: None,
         }
     }
 
@@ -372,6 +378,15 @@ impl OrchestratorView {
 
     /// Takes the worker's newest snapshot; called from the host's tick.
     pub(crate) fn poll(&mut self, cx: &mut Context<Self>) {
+        // Discovery belongs to the host tick, never to a board control read.
+        if !self.account_started {
+            self.account_started = true;
+            if !cfg!(test) {
+                Self::find_forgejo_account(cx);
+            } else {
+                self.kanban.account_ready = true;
+            }
+        }
         let mut changed = false;
         let mut read = false;
         for repo in &mut self.repos {
@@ -396,6 +411,7 @@ impl OrchestratorView {
             self.follow_pull_request();
             changed = true;
         }
+        self.prepare_kanban(cx);
         if self.pr.poll() {
             // A comment or merge landed: read the pull request and list again.
             if self.pr.take_settled() {
@@ -411,6 +427,9 @@ impl OrchestratorView {
 
     /// Asks the worker for the open pull request's status.
     fn reload_pull_request(&self) {
+        if self.kanban.shown {
+            return;
+        }
         let number = self
             .detail
             .as_ref()
@@ -727,6 +746,10 @@ impl OrchestratorView {
     }
 
     fn open_detail(&mut self, key: String, cx: &mut Context<Self>) {
+        if self.kanban.shown {
+            self.open_kanban_key(&key, cx);
+            return;
+        }
         self.activate(&key);
         let Some(item) = self.item(&key) else {
             return;
@@ -810,6 +833,10 @@ impl OrchestratorView {
             return;
         }
         if self.dialog.is_some() {
+            return;
+        }
+        if self.kanban.shown && self.kanban_key(event, window, cx) {
+            cx.stop_propagation();
             return;
         }
         if self.comment.read(cx).focus.is_focused(window) {
@@ -903,7 +930,11 @@ impl Focusable for OrchestratorView {
 
 impl Render for OrchestratorView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let body = self.render_inbox(window, cx);
+        let body = if self.kanban.shown {
+            self.render_kanban(window, cx)
+        } else {
+            self.render_inbox(window, cx)
+        };
         let notice = self.render_notice(cx);
         let overlay = self.render_overlay(cx);
         let look = &self.look;

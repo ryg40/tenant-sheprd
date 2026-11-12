@@ -1,9 +1,28 @@
-:root { color-scheme: light dark; --fg: #1f2328; --muted: #59636e; --bg: #ffffff;
-  --line: #d1d9e0; --code: #f6f8fa; --link: #0969da; }
+/* The window's theme (`/.herdr/theme.css`, the `--hk-` tokens) colors the
+   page; the values after each comma stand in where it is missing. */
+:root { color-scheme: light dark; --fg: var(--hk-fg, #1f2328); --muted: var(--hk-muted, #59636e);
+  --bg: var(--hk-bg, #ffffff); --line: var(--hk-border, #d1d9e0); --code: var(--hk-surface, #f6f8fa);
+  --link: var(--hk-accent, #0969da);
+  --tok-comment: var(--hk-code-comment, #59636e); --tok-string: var(--hk-code-string, #0a3069);
+  --tok-number: var(--hk-code-number, #0550ae); --tok-constant: var(--hk-code-constant, #0550ae);
+  --tok-keyword: var(--hk-code-keyword, #cf222e); --tok-type: var(--hk-code-type, #953800);
+  --tok-function: var(--hk-code-function, #6639ba); }
 @media (prefers-color-scheme: dark) {
-  :root { --fg: #e6edf3; --muted: #9198a1; --bg: #0d1117; --line: #3d444d;
-    --code: #151b23; --link: #4493f8; }
+  :root { --fg: var(--hk-fg, #e6edf3); --muted: var(--hk-muted, #9198a1); --bg: var(--hk-bg, #0d1117);
+    --line: var(--hk-border, #3d444d); --code: var(--hk-surface, #151b23); --link: var(--hk-accent, #4493f8);
+    --tok-comment: var(--hk-code-comment, #9198a1); --tok-string: var(--hk-code-string, #a5d6ff);
+    --tok-number: var(--hk-code-number, #79c0ff); --tok-constant: var(--hk-code-constant, #79c0ff);
+    --tok-keyword: var(--hk-code-keyword, #ff7b72); --tok-type: var(--hk-code-type, #ffa657);
+    --tok-function: var(--hk-code-function, #d2a8ff); }
 }
+.tok-comment { color: var(--tok-comment); font-style: italic; }
+.tok-string { color: var(--tok-string); }
+.tok-number { color: var(--tok-number); }
+.tok-constant { color: var(--tok-constant); }
+.tok-keyword { color: var(--tok-keyword); }
+.tok-type { color: var(--tok-type); }
+.tok-function { color: var(--tok-function); }
+h1, h2, h3, h4, h5, h6 { scroll-margin-top: 12px; }
 html { background: var(--bg); color: var(--fg); }
 body { margin: 0; font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
 .markdown { max-width: 75ch; margin: 0 auto; padding: 32px 24px 64px; overflow-wrap: break-word; }

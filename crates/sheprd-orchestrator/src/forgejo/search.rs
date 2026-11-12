@@ -11,6 +11,7 @@ use super::{Error, MAX_OPEN, PAGE, Reply, TIMEOUT, fetch, issue::Entry};
 use crate::{
     Checkpoint, Item, Provider, SourceKey,
     forge::{Credential, Listing, Scheme, agent},
+    kanban::history::Record,
 };
 use chrono::Utc;
 use secrecy::SecretString;
@@ -36,6 +37,17 @@ pub struct SearchNode {
 }
 
 impl SearchNode {
+    pub(super) fn into_record(self, host: &str) -> Option<Record> {
+        if self.entry.state != "closed" {
+            return None;
+        }
+        let facts = self.entry.facts(self.entry.closed_at);
+        Some(Record {
+            facts,
+            item: self.into_item(host)?,
+        })
+    }
+
     /// What tells entries apart across repositories: the repository and the
     /// number, which repositories reuse. `None` without a repository.
     fn key(&self) -> Option<(String, u64)> {

@@ -5,7 +5,7 @@
 
 use super::Localize;
 use crate::i18n::fl;
-use sheprd_orchestrator::{Error, beads, gitlab, private_file};
+use sheprd_orchestrator::{Error, beads, gitlab, kanban, private_file};
 
 impl Localize for Error {
     fn localize(&self) -> String {
@@ -30,6 +30,7 @@ impl Localize for Error {
                 )
             }
             Self::ItemKey(key) => fl!("error-orchestrator-item-key", key = format!("{key:?}")),
+            Self::SourceKey(key) => fl!("error-kanban-source-key", key = format!("{key:?}")),
             Self::Owner(owner) => fl!("error-orchestrator-owner", owner = format!("{owner:?}")),
             Self::NewerSchema { found, known } => fl!(
                 "error-orchestrator-newer-schema",
@@ -72,6 +73,7 @@ impl Localize for Error {
             Self::Forgejo(error) => error.localize(),
             Self::Github(error) => error.localize(),
             Self::Gitlab(error) => error.localize(),
+            Self::Kanban(error) => error.localize(),
             Self::Role(error) => error.localize(),
             Self::Cancelled => fl!("error-orchestrator-cancelled"),
             Self::Worker(error) => fl!("error-orchestrator-worker", error = error.to_string()),
@@ -84,6 +86,39 @@ impl Localize for Error {
             Self::HostCannotTake => fl!("error-orchestrator-host-cannot-take"),
             Self::Teleport(error) => fl!("error-orchestrator-teleport", error = error.localize()),
             Self::PullRequestChanged => fl!("error-orchestrator-pull-request-changed"),
+        }
+    }
+}
+
+impl Localize for kanban::Error {
+    fn localize(&self) -> String {
+        match self {
+            Self::CrossLane => fl!("error-kanban-cross-lane"),
+            Self::DuplicateSource => fl!("error-kanban-duplicate-source"),
+            Self::HistoryIncomplete => fl!("error-kanban-history-incomplete"),
+            Self::HistoryLimit { max } => fl!("error-kanban-history-limit", max = *max),
+            Self::HistoryRecord => fl!("error-kanban-history-record"),
+            Self::HistoryWindow => fl!("error-kanban-history-window"),
+            Self::IdenticalLabels => fl!("error-kanban-identical-labels"),
+            Self::Label { max } => fl!("error-kanban-label", max = *max),
+            Self::MissingApproval => fl!("error-kanban-missing-approval"),
+            Self::MissingLabel => fl!("error-kanban-missing-label"),
+            Self::MoveBusy => fl!("error-kanban-move-busy"),
+            Self::MovePermission => fl!("error-kanban-move-permission"),
+            Self::ReadOnlyMove => fl!("error-kanban-read-only-move"),
+            Self::Repository => fl!("error-kanban-repository"),
+            Self::Route => fl!("error-kanban-route"),
+            Self::Selector(error) => fl!("error-kanban-selector", error = error.localize()),
+            Self::SelectorCanonical => fl!("error-kanban-selector-canonical"),
+            Self::StaleMove => fl!("error-kanban-stale-move"),
+            Self::TooManySources { max } => fl!("error-kanban-too-many-sources", max = *max),
+            Self::UnsafeLabel => fl!("error-kanban-unsafe-label"),
+            Self::UnsupportedProvider(provider) => {
+                fl!(
+                    "error-kanban-unsupported-provider",
+                    provider = provider.as_str()
+                )
+            }
         }
     }
 }

@@ -321,7 +321,8 @@ project_roots = []
 # cycle_windows = "cmd-`"
 # close_window = "cmd-alt-shift-w"
 # Unbound by default: themes, reconnect, logs, about, worktree_notes,
-# edit_worktree_note, review_changes, git_menu, toggle_annotate.
+# edit_worktree_note, review_changes, git_menu, toggle_annotate,
+# toggle_source.
 
 # What the focused pane receives instead of a keystroke, as Ghostty's text:
 # binds do. The value is a key a terminal can receive (ctrl-a, home, alt-b,
@@ -583,6 +584,12 @@ size = 12
 # Forget a paired device that has not connected for this many days (1 to 365),
 # or 0 to keep it until it is revoked.
 # device_idle_days = 30
+
+# Tracker-backed board labels. Replace sources as a complete array of inline tables.
+[kanban]
+in_progress_label = "status: in-progress"
+in_review_label = "status: in-review"
+sources = []
 
 # Native GitHub sign-in uses the public Sheprd GitHub App by default.
 # Optionally override with your own Device Flow-enabled app's public client ID.

@@ -2500,6 +2500,23 @@ window at once, and `sheprd ui panel NAME` shows a section.
 - **Pull requests** and **Issues** list every repository the connected hosts'
   workspaces hold (see [Orchestrator](#orchestrator)). Refresh spins while a
   sync runs.
+- **Kanban**, after Issues and before Tasks, shows GitHub and Forgejo repository lanes.
+  Fixed columns are Open, In progress, In review, and Done. Compact cards open full item details in a popup.
+  Click a repository to fold it. Search matches titles, identifiers, labels, assignees, and repository names.
+  Arrow keys select cards; Enter opens details; Escape returns focus; `/` focuses search.
+  Drag the separate lane grip to reorder; Escape cancels without saving. Tab selects a lane.
+  Alt+Up and Alt+Down move that lane through the same local order operation.
+  Lane order survives restart and filters. Refresh and lane moves keep the open card, selection, folds, and scroll.
+  A save failure shows an unsaved notice without undoing the local order, including automatic lane additions and removals.
+  If initial preferences cannot be read, this run keeps their bytes unchanged; repair the file and restart to resume saving.
+  Saved order applies before display caps. Pending or failed host discovery cannot remove saved lanes.
+  Card moves remain unavailable. Done includes Forgejo's recent settled history and GitHub's already loaded settled PRs.
+  Each lane shows its history coverage, including cached samples, caps, and failed reads.
+  Samples contain at most 100 records per repository updated within 30 days, not all closures in that period.
+  Forgejo account reads cap the whole account at 200; lane hints report that shared limit.
+  Failed reads preserve the last successful cards. GitHub's history reader arrives later.
+  Counts describe loaded records, not the tracker's complete backlog.
+  One horizontal scroll position keeps columns aligned in narrow windows.
 - **Ports** lists every TCP port your user listens on in this computer,
   whoever started it: the app or script behind it (`vite`, `next dev`,
   `manage.py runserver`), its project, CPU and memory, uptime, and the
@@ -2522,6 +2539,27 @@ issue or pull request updated, an alert or report opened, or an agent coming
 to need you. When each section was last open is remembered per daemon between
 runs. Agent states are timed from when this client first saw them, so after a
 restart an agent already waiting on you counts as new once.
+
+## Kanban settings
+
+The existing GUI config validates and hot-reloads `[kanban]` mappings.
+Defaults are `status: in-progress` and `status: in-review`.
+Native closure wins. Conflicting labels place an open issue in Open with a warning.
+Incomplete label evidence also remains Open with a warning. Agent status never selects a column.
+PR cards remain read-only; closed and merged records retain distinct badges.
+
+```toml
+[kanban]
+in_progress_label = "status: in-progress"
+in_review_label = "status: in-review"
+sources = [{ source = "forgejo:forgejo.example.test:team/app", in_progress_label = "workflow-active", in_review_label = "workflow-review" }]
+```
+
+Use `sheprd config get|set|unset|check`. Setting `kanban.sources` replaces the complete array.
+Invalid mappings never reach the overrides file. Dotted keys change scalar defaults, not array entries.
+`sheprd orchestrator board --json` reads bounded, revision-fenced pages without showing the section.
+`sheprd orchestrator board order LANE [--before LANE]` changes only local lane order.
+Use canonical lane keys from the board output. Omit `--before` to move a lane to the end.
 
 ## Orchestrator
 
@@ -2865,7 +2903,36 @@ its dashes turn solid once its target is verified:
 
 A plain URL is read from its row. One that reaches the pane's right edge may
 wrap onto the next row; a daemon that offers `pane.link.resolve` reads it
-whole, and otherwise it needs explicit terminal hyperlink metadata. A file
+whole, and otherwise it needs explicit terminal hyperlink metadata. An agent
+such as Claude Code breaks a long line itself and indents the rest on the
+next row, which the terminal does not mark as a wrap. A web address broken
+that way is read whole, up to 16 rows, when all of these hold:
+
+- The row ends where Claude Code was seen to end a broken row: at the pane's
+  right edge, one column before it, or five columns before it.
+- The next row is indented.
+- The indent and the first word of the next row reach past the column where
+  the last word of the row above starts. A program that wraps at blanks
+  breaks only a word that is too long for one row.
+- The first word of the next row has a letter or a digit, and a digit or one
+  of `/ = % &`, and does not start an address of its own (`https://` and the
+  other plain schemes).
+- The host stands whole on the first row.
+
+Every row of it is underlined, and a click on any of them opens it. An
+address that ends its row before a new word, a list item, or another
+address stays alone. Known limits: the rows of a broken word and of a line
+that ended can look the same. An address that ends at one of the three
+columns before an indented word such as `2.` or `src/main.rs` reads as one
+address with that word. An address broken before a rest of plain letters
+(`getting-sta` over `rted`), at another column, or inside its host is not
+joined; its first row then opens the cut address that the daemon reads. An
+address of more than 16 rows is not opened. A plugin link handler still
+gets the daemon's cut address. An address that ends exactly at the pane's
+edge before an indented row that does not continue it is read alone from
+its row.
+
+A file
 path or `file://` address that fills a row to the right edge and goes on in
 the next is read across those rows, up to 16 of them. The rest may start the
 next row, where the terminal wraps it, or follow an indent, where an agent
@@ -3192,7 +3259,8 @@ closed to other users; `sheprd browser clear-data` asks to remove it
   dismissed, and the page comes back then. A page that none of
   these reach keeps showing.
 - A default Linux build has no embedded pages: browser tab requests open
-  the system browser, and local files and annotations are unavailable. A
+  the system browser, a local file opens as its source, and annotations
+  are unavailable. A
   build with the `servo` cargo feature shows web addresses and local files
   in tabs, drawn by Servo inside the app's own process, so a page that
   crashes the engine ends the app. It has no clipboard, input method, or
@@ -3420,6 +3488,36 @@ since pages cannot open `file:` addresses:
 - Files are read off the UI thread and are never cached, so
   `sheprd browser reload` shows an edited file. Showing the same file
   again from the same pane reuses its tab.
+- A tab that shows a local file has a bar under its toolbar: a breadcrumb of
+  the file's path from the workspace's folder, **Open in Editor**, and for a
+  Markdown or HTML file a switch between **Rendered** and **Source**, the
+  read-only code view. `sheprd browser open FILE --source` opens the source,
+  and `toggle_source` under `[keybindings]` switches the file in view; it has
+  no default key. The switch is the window's own and is not saved. A tab
+  that goes on to a web address shows that page.
+- A Markdown or HTML file in a hidden folder, or directly in the home
+  directory, opens as its source in a code tab: the page rule above does
+  not bend. The bar says why, **Rendered** is refused with the same reason,
+  and the command's answer carries it (`"source": "folder"`). One function
+  decides which view a file gets, `browser::file_view::view_for`: for
+  `browser open`, the switch, and a file opened from the
+  [file explorer](../../website/docs/editors.md#file-explorer).
+- A folder of the breadcrumb that the file explorer lists is a link: a
+  click shows the explorer with that folder open and selected, and leaves
+  the keyboard where it is.
+- A Markdown tab bears its file's name. An HTML page keeps the title it
+  gives itself, and has the file's name until then.
+- The tab follows its file: once a second the app reads the metadata of the
+  files its groups show, off the UI thread, and reloads the page, or reads
+  the source again, when one changed. Files a page loads are not watched.
+- A Markdown page's fenced code is colored by the app, in the window's theme,
+  which is written into the page; its policy still blocks every script.
+  Open Markdown pages load again when the theme changes. One page colors
+  at most 48 KiB and 1,000 lines of code, 400 lines of one block; the rest
+  stays plain.
+- A build without pages gives a local file a code tab with its source,
+  says so in the command's answer (`"source": "build"`) and in the bar, and
+  refuses **Rendered**.
 
 ### Letting Agents Open Pages
 

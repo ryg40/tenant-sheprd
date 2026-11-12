@@ -42,6 +42,10 @@ impl OrchestratorView {
     /// Follows the open pull request, and reads its conversation when the
     /// Conversation page shows and nothing was read yet.
     pub(super) fn follow_pull_request(&mut self) {
+        if self.kanban.shown {
+            self.pr.track(None);
+            return;
+        }
         let target = self
             .open_pull_request()
             .and_then(|pr| pr_actions::Target::for_reading(pr).ok());

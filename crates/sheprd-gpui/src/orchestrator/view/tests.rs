@@ -19,6 +19,8 @@ mod failure_text;
 mod forgejo_account;
 mod gitlab_merge_request;
 mod groups;
+mod kanban;
+mod kanban_order;
 mod list_switch;
 mod markdown;
 mod non_projects;

@@ -62,6 +62,16 @@ impl TryFrom<SavedCodeFile> for CodeFile {
 }
 
 impl CodeFile {
+    /// The file at `path`, checked as a saved one is.
+    pub(crate) fn at(path: &Path) -> crate::Result<Self> {
+        let path = path.to_str().ok_or(crate::Error::InvalidCodeFile)?;
+        SavedCodeFile {
+            path: path.to_owned(),
+            line: None,
+        }
+        .try_into()
+    }
+
     /// The file's name, as its tab is titled.
     pub(crate) fn name(&self) -> &str {
         Path::new(&self.path)
@@ -279,11 +289,7 @@ impl SheprdWindow {
         if self.code_views.contains_key(&id) {
             return false;
         }
-        let Some(Location::Code { file }) = cx
-            .try_global::<Store>()
-            .and_then(|store| store.get(id))
-            .and_then(|tab| tab.location.clone())
-        else {
+        let Some(file) = self.code_file(id, cx) else {
             return false;
         };
         self.code_views.insert(
@@ -303,13 +309,22 @@ impl SheprdWindow {
         true
     }
 
+    /// Gives tab `id` its view and reads its file, for a tab that starts to
+    /// show code while open: a local page switched to its source.
+    pub(crate) fn show_code_view(&mut self, id: TabId, cx: &mut Context<Self>) {
+        self.ensure_code_view(id, cx);
+        self.load_code_view(id, cx);
+    }
+
+    /// Reads tab `id`'s file again, as when it changed on disk. The old
+    /// text shows, where it was, until the new one is read.
+    pub(crate) fn reload_code_view(&mut self, id: TabId, cx: &mut Context<Self>) {
+        self.load_code_view(id, cx);
+    }
+
     /// Reads tab `id`'s file off the UI thread, then colours it.
     fn load_code_view(&mut self, id: TabId, cx: &mut Context<Self>) {
-        let Some(Location::Code { file }) = cx
-            .try_global::<Store>()
-            .and_then(|store| store.get(id))
-            .and_then(|tab| tab.location.clone())
-        else {
+        let Some(file) = self.code_file(id, cx) else {
             return;
         };
         let Some(view) = self.code_views.get_mut(&id) else {
@@ -396,7 +411,9 @@ impl SheprdWindow {
         let missing: Vec<TabId> = store
             .in_workspace(&scope, &workspace)
             .filter(|tab| {
-                matches!(tab.location, Some(Location::Code { .. }))
+                // A local page that shows its source is drawn as code too.
+                (matches!(tab.location, Some(Location::Code { .. }))
+                    || self.shows_file_source(tab.id, cx))
                     && !self.code_views.contains_key(&tab.id)
             })
             .map(|tab| tab.id)
@@ -411,11 +428,7 @@ impl SheprdWindow {
     /// Opens tab `id`'s file in the terminal editor, at the marked line or
     /// the top one in view, beside the focused pane.
     fn open_code_view_in_editor(&mut self, id: TabId, cx: &mut Context<Self>) {
-        let Some(Location::Code { file }) = cx
-            .try_global::<Store>()
-            .and_then(|store| store.get(id))
-            .and_then(|tab| tab.location.clone())
-        else {
+        let Some(file) = self.code_file(id, cx) else {
             return;
         };
         let line = self.code_views.get(&id).map(CodeView::editor_line);

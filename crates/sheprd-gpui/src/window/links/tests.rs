@@ -7,6 +7,7 @@ use sheprd_client::protocol::{
     CellData, ClientShellSnapshot, FrameData, PaneSurfaceFrame, PaneSurfacePane, SurfaceRect,
 };
 
+mod broken_rows;
 mod cases;
 mod content_updates;
 mod external;

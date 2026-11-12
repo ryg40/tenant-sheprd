@@ -26,6 +26,8 @@ pub enum Error {
     Provider(String),
     #[error("Not an item key: {0:?}")]
     ItemKey(String),
+    #[error("Not a source key: {0:?}")]
+    SourceKey(String),
     #[error("Unknown run owner {0:?}")]
     Owner(String),
     #[error(
@@ -80,6 +82,8 @@ pub enum Error {
     Github(#[source] Box<sheprd_github::Error>),
     #[error(transparent)]
     Gitlab(#[from] super::gitlab::Error),
+    #[error(transparent)]
+    Kanban(#[from] super::kanban::Error),
     #[error(transparent)]
     Role(#[from] super::role::Error),
     #[error("Cancelled")]

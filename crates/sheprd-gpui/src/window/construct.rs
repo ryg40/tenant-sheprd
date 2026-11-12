@@ -86,6 +86,7 @@ impl SheprdWindow {
         gui_config_diagnostic.sync_own(config.diagnostic().as_deref());
         let catalog = endpoint::Catalog::new(&target);
         let menu = menu::MenuState::new(cx);
+        let file_tree = crate::file_tree::FileTree::new(cx);
         // Starts the thread that reads and saves the marks file.
         let teleport_marks = crate::teleport::Marks::start();
         let sidebar_search = sidebar::SidebarSearch::new(cx);
@@ -198,6 +199,8 @@ impl SheprdWindow {
             )],
             fan_out: None,
             file_transfer: None,
+            file_tree,
+            file_tree_width: crate::panel_resize::FILE_TREE,
             find: None,
             find_memory: Default::default(),
             flash: None,
@@ -215,6 +218,7 @@ impl SheprdWindow {
             input_probe: smoke::InputProbe::default(),
             install_warning_shown: false,
             integrations: Default::default(),
+            kanban_order: Default::default(),
             key_layout: prefix::current_layout,
             key_press: function_keys::current_press,
             landing_launch: None,
@@ -322,6 +326,7 @@ impl SheprdWindow {
             version_notice_shown: false,
             viewport_width: 0.,
             wake: endpoint::WakeClock::now(),
+            walkr: Default::default(),
             wheel: WheelAccumulator::default(),
             workspace_drag: None,
             worktree_script: None,

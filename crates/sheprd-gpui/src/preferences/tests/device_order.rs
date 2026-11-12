@@ -6,8 +6,8 @@ fn the_device_order_round_trips_and_damage_loses_only_itself() {
     let directory = TestDirectory::new();
     let path = directory.0.join("preferences.json");
     let chrome = Chrome {
-        sidebar_width: Some(250.),
         device_order: vec!["wsl:Ubuntu".into(), "ssh:a".into()],
+        sidebar_width: Some(250.),
         ..Chrome::default()
     };
     write_chrome(&path, chrome.clone()).unwrap();

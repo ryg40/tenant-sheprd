@@ -172,18 +172,23 @@ fn a_path_an_agent_wrapped_under_a_hanging_indent_reads_whole() {
 }
 
 #[test]
-fn an_indented_line_goes_on_only_from_a_path() {
+fn an_indented_line_goes_on_from_a_path_or_as_the_rest_of_an_address() {
     // Prose that happens to fill its row: the indented path below it is a
     // line of its own, read alone as before.
     let prose = lines(&["the build is green", "    src/main.rs ok"], 18);
     let link = read(&prose, 6, 1).unwrap();
     assert_eq!(link.target, bare("src/main.rs", None));
     assert_eq!(link.rows().collect::<Vec<_>>(), vec![(1, 4..15)]);
-    // A web address that seems to go on after an indent is still not
-    // guessed.
+    // A web address that fills its row goes on after an indent in a word
+    // that would not fit beside it and reads as the rest of an address, as
+    // `/b` does. The other shapes are in `agent_wrapped_urls`.
     let web = lines(&["see https://example.com/a", "    /b now"], 25);
-    assert!(read(&web, 5, 0).is_none());
-    assert!(read(&web, 4, 1).is_none());
+    let link = read_everywhere(&web, &[(4, 0), (24, 0), (4, 1), (5, 1)]).unwrap();
+    assert_eq!(
+        link.target,
+        RowTarget::Web("https://example.com/a/b".into())
+    );
+    assert_eq!(link.rows().collect::<Vec<_>>(), vec![(0, 4..25), (1, 4..6)]);
 }
 
 #[test]

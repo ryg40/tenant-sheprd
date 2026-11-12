@@ -75,7 +75,7 @@ fn visits_stored_before_a_save_that_raced_the_load_are_saved_again(cx: &mut Test
         view.save_chrome();
         chrome
     });
-    view.update(cx, |view, _| view.apply_stored_chrome(chrome));
+    view.update(cx, |view, _| view.apply_stored_chrome(Ok(chrome)));
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         let read = read_chrome(&path).ok();

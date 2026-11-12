@@ -2,7 +2,10 @@
 //! local pages under `/.herdr/`, so an agent's explainer or mockup matches
 //! the window it sits in. Files whose names start with a dot are never read
 //! from a page's folder, so these paths cannot hide one of the page's own.
-use crate::config::{Theme, mix};
+use crate::{
+    config::{Theme, mix},
+    review::highlight::{Contrast, Token},
+};
 
 const KIT_CSS: &str = include_str!("kit/kit.css");
 const KIT_JS: &str = include_str!("kit/kit.js");
@@ -19,7 +22,12 @@ pub(crate) fn theme_key(theme: &Theme) -> ThemeKey {
         theme.active,
         theme.muted,
         theme.primary(),
-        theme.palette[1] ^ theme.palette[2].rotate_left(8) ^ theme.palette[3].rotate_left(16),
+        theme.palette[1]
+            ^ theme.palette[2].rotate_left(8)
+            ^ theme.palette[3].rotate_left(16)
+            ^ theme.palette[4].rotate_left(4)
+            ^ theme.palette[5].rotate_left(12)
+            ^ theme.palette[6].rotate_left(20),
     ]
 }
 
@@ -64,6 +72,15 @@ pub(crate) fn theme_css(theme: &Theme) -> String {
     });
     for (name, color) in tokens {
         css.push_str(&format!("  --hk-{name}: #{:06x};\n", color & 0xff_ffff));
+    }
+    // The colors of code, which a rendered Markdown file's blocks use.
+    for &token in Token::ALL {
+        let color = token.colour(theme, Contrast::Theme);
+        css.push_str(&format!(
+            "  --hk-code-{}: #{:06x};\n",
+            token.css_name(),
+            color & 0xff_ffff
+        ));
     }
     css.push_str("}\n");
     css

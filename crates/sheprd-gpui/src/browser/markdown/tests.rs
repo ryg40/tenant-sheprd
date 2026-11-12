@@ -1,7 +1,7 @@
 use super::*;
 
 fn body(source: &str) -> String {
-    page(source, "notes.md")
+    page(source, "notes.md", "")
 }
 
 #[test]
@@ -104,7 +104,7 @@ fn the_title_is_the_first_heading_or_the_file_name() {
     assert!(body("no heading here").contains("<title>notes.md</title>"));
     assert!(body("").contains("<title>notes.md</title>"));
     assert!(body("#   \n\ntext").contains("<title>notes.md</title>"));
-    assert!(page("x", "a\"<b>.md").contains("<title>a&quot;&lt;b&gt;.md</title>"));
+    assert!(page("x", "a\"<b>.md", "").contains("<title>a&quot;&lt;b&gt;.md</title>"));
 }
 
 #[test]
@@ -205,3 +205,5 @@ fn links_and_ids_that_already_carry_the_prefix_still_meet() {
     assert!(html.contains("href=\"#user-content-top\""), "{html}");
     assert!(html.contains("<div id=\"user-content-top\">"), "{html}");
 }
+
+mod code_blocks;

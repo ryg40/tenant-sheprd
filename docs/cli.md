@@ -50,7 +50,7 @@ Every command accepts:
 | 5 | The window, workspace, tab, host, or file is not there |
 | 6 | A dialog is open in the window, or the app is busy |
 | 7 | The app did not answer in time |
-| 8 | Not available on this platform or in this version of the app |
+| 8 | Not available on this platform or in this version of the app, or the configuration turns the action off (for example a section of the activity bar with `[sidebar] activity_bar = false`) |
 
 ## Commands
 
@@ -70,7 +70,7 @@ Every command accepts:
 | `ui sidebar\|statusbar [on\|off\|toggle]` | For this window and session |
 | `ui font-size +\|-\|reset\|POINTS` | The terminal font size for this session |
 | `ui agent-group [NAME\|all]` | List the agents panel's coordinator groups, marking the one shown, or show one group's sessions with its coordinator first, or `all` of them, for this window and session. Exits 5 for a group no coordinator names and 8 unless `[sidebar] coordinator_suffix` is set and the agents panel is shown |
-| `ui panel workspaces\|overview\|pull-requests\|issues\|tasks\|security\|automations\|ports\|usage` | Show an activity bar section: Workspaces with the sidebar expanded, Overview of what needs you on every host, the focused workspace's pull requests or issues across the window, Beads tasks across the window's projects, the vulnerability reports and Dependabot alerts of your repositories, every host's automation scripts and runs, every port this computer's user listens on, or every host's plan usage |
+| `ui panel workspaces\|overview\|pull-requests\|issues\|kanban\|tasks\|security\|automations\|ports\|usage\|walkr` | Show an activity bar section: Workspaces with the sidebar expanded, Overview of what needs you on every host, the focused workspace's pull requests or issues across the window, Beads tasks across the window's projects, the vulnerability reports and Dependabot alerts of your repositories, every host's automation scripts and runs, every port this computer's user listens on, every host's plan usage, or [Walkr](walkr.md) (a run must exist, this computer must have a saved Walkr session, or `walkr.url` must be set; else exit 8) |
 | `run COMMAND` | Any app command by its `[keybindings]` name, as the palette runs it |
 | `commands` | The names `run` accepts (no app needed) |
 | `open DIR` | Open a folder as **Open Project** in the palette does, starting the app if needed (below) |
@@ -97,7 +97,7 @@ Sheprd** entry, which both Windows installers add, runs this command through
 | --- | --- |
 | `tab [list]` | Pages, code, reviews, and Devices tabs with IDs |
 | `tab focus\|close ID` | |
-| `browser open\|reload\|feedback` | See [browser tabs](../crates/sheprd-gpui/README.md#browser-tabs). On Linux, pages open in tabs only in a build with the `servo` cargo feature ([plan](linux-browser-plan.md)), whose engine runs inside the app, so a page that crashes it ends the app; a default Linux build opens web addresses in the system browser and refuses local files with exit 8 |
+| `browser open\|reload\|feedback` | See [browser tabs](../crates/sheprd-gpui/README.md#browser-tabs). On Linux, pages open in tabs only in a build with the `servo` cargo feature ([plan](linux-browser-plan.md)), whose engine runs inside the app, so a page that crashes it ends the app; a default Linux build opens web addresses in the system browser and shows a local file's source in its tab. `browser open FILE --source` shows the source of a Markdown or HTML file, read-only, in place of its page; the tab's switch and the `toggle_source` command change between the two. The answer says when a file opened as its source: `--json` carries `"source"` with `asked`, `folder` (a Markdown or HTML file in a hidden folder or directly in the home directory, which never renders as a page), or `build` (a build without pages), and the text says "as source". Any other file in such a folder is refused with exit 2. A file's tab follows the file as it changes on disk |
 | `browser list` | Page tabs only |
 | `browser navigate ID URL` | Load another address in a page tab |
 | `browser back\|forward ID` | |
@@ -109,6 +109,8 @@ Sheprd** entry, which both Windows installers add, runs this command through
 | `code edit FILE[:LINE]` | Your terminal editor, in a new pane beside yours |
 | `devices` | The Devices overview |
 | `orchestrator [--repo PATH]` | Show the Issues section narrowed to your checkout's project, or PATH's |
+| `orchestrator board [--cursor CURSOR]` | Read the targeted window's prepared Kanban board without focus, panel changes, or provider I/O. Exit 4 means pending or restart-required; an empty prepared board succeeds. The activity bar must be enabled (else exit 8). `--repo` and `--forgejo` refuse. |
+| `orchestrator board order LANE [--before LANE]` | Move a known canonical lane before another, or to the end. Supports `--json` and `--window`. Saves local order asynchronously without tracker writes. Exit 4 means preparation is pending, 5 means an unknown lane/window, and 6 means a busy drag or dialog. `--repo`, `--forgejo`, and `--cursor` refuse. |
 | `orchestrator items\|issues\|prs\|tasks` | What it last synced, from its local database (no app needed); `tasks` is the repository's Beads tasks, with each one's assignee, priority, and blockers in `--json` |
 | `orchestrator issues --forgejo HOST` | The open issues of every repository the Forgejo token for HOST reads, as the Issues section last synced them (no app needed); HOST is the one `FORGEJO_HOST` names |
 | `review` | The review of your workspace's uncommitted changes |
@@ -120,6 +122,13 @@ selects an existing workbench, and `config unset px0.url` restores automatic
 discovery. `--json` returns the opened tab ID and workspace. Exit 0 means the
 tab opened; startup errors appear in that tab with Retry. Remote workspaces
 and every Linux build, with or without the `servo` feature, return exit 8. See [px0](../crates/sheprd-gpui/README.md#px0).
+
+Board JSON includes a `history` array in each lane (protocol 21).
+Each entry reports the collection, repository/account scope, cutoff, cap (`limit`), loaded count,
+collection-wide loaded count, truncation, failure, cached/live origin, last success, and reader support.
+History coverage is separate from active freshness and displayed-card counts.
+The sample uses update time, not closure time; failed reads retain the last successful sample.
+`expanded_done_history` means at least one prepared lane has a reader, not complete history for every lane.
 
 ### Worktrees and agents
 
@@ -185,6 +194,9 @@ not take it either.
 | `cloud batches` | The batches the app keeps, newest last; the oldest are left out when they would not fit in one answer |
 | `processes [--pane ID]` | The processes under a pane, with CPU and memory (no app needed) |
 | `search symbol\|file QUERY` | Go to Symbol or Go to File over the current checkout (no app needed) |
+| `files [status]` | The file explorer on the window's right: whether it shows, and the folder it lists, which is the checkout of the window's focused pane (the folder above it that holds `.git`, else its folder), not of the caller's pane. Only a local checkout is listed |
+| `files show\|hide\|toggle` | Show, hide, or toggle the file explorer (also the `toggle_file_explorer` command). The keyboard stays where it is |
+| `files reveal PATH` | Show the file explorer with the file or folder `PATH` selected and the folders holding it open. Opens nothing. Exits 5 when `PATH` is not inside the folder the explorer lists, 8 for a remote host |
 
 ### Settings and services
 
@@ -194,6 +206,9 @@ not take it either.
 | `config get\|set\|unset KEY [VALUE]` | Read or change `config-gpui.local.toml`, keeping its comments. A value that would not load, or an unknown key, is refused and nothing is written; the app applies the rest at once (no app needed) |
 | `config check` | Report invalid settings, exit 1 if any |
 | `config reload` | Reread Herdr's config and this app's |
+| `walkr connect URL\|- [--show]` | Tell the [Walkr section](walkr.md#run) the page address of a Walkr server the calling pane started; `-` reads it from the first line of standard input. Only `http` on `127.0.0.1`, `localhost` or `[::1]` with a port, at most 2,048 bytes; else exit 2 and nothing changes. `--show` also shows the section; with the activity bar off (`[sidebar] activity_bar = false`) it exits 8 and connects nothing, as `ui panel` does. A run holds at most 64 panes: one more exits 6 and changes nothing. Sheprd shows, logs and keeps host and port only, and a usage error names no argument, because a misplaced one may be the address. Runs in a Herdr pane |
+| `walkr disconnect` | The calling pane no longer holds the run. The page stays until the user selects Close in the section or it is idle for 2 hours; no command closes it. Exit 0 also when the pane held no run |
+| `walkr status` | [Walkr connectivity](walkr.md), host and port, probe age, the source (`run`, `override`, or `none`), whether the run is live, and the count of saved Compare sessions (`sessions`). Exit 0 for a determined state, including unreachable; 4 (nothing yet, source `none`) if no run is connected and `walkr.url` is unset; 7 if no fresh probe answers within 7 seconds |
 | `theme [list]`, `theme set NAME` | The app theme. A device's terminal theme is `config set devices.ID.theme NAME`, with the ID from `host list` minus its `ssh:` prefix |
 | `font [list]`, `font set NAME`, `font reset` | |
 | `language [status]`, `language list`, `language set system\|TAG` | The language set and the locale Sheprd shows, the languages there are, each with its name in itself as Settings > General lists it, or save the `language` setting (a BCP 47 tag; `en-XA` and `en-XB` are pseudo-locales). Only `status` asks the app, and without it reports what it would show |
@@ -418,8 +433,8 @@ One JSON request line, one JSON response line, then the socket closes. A
 request is `{"method", "caller", "op"}`, where `caller` carries the pane,
 workspace, daemon socket, and window, and `op` is tagged with `"op"`. Browser
 requests keep their original flat form (`browser.open`, `browser.reload`,
-`browser.feedback`, `notes.send`). `status` reports the protocol version,
-currently 6. Requests and responses are bounded to 256 KiB, a request that
+`browser.feedback`, `notes.send`). `status` reports the protocol version.
+Requests and responses are bounded to 256 KiB, a request that
 waits says for how long (at most 600 seconds), and the app answers at most a
 few requests at a time.
 

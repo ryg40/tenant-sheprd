@@ -540,7 +540,8 @@ impl SheprdWindow {
         self.drawn_group_slots()
             .into_iter()
             .filter_map(|slot| match self.group_shown(slot.id, cx) {
-                Shown::Page(id) => Some(id),
+                // A local page that shows its source stays hidden.
+                Shown::Page(id) if !self.shows_file_source(id, cx) => Some(id),
                 _ => None,
             })
             .collect()

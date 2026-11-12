@@ -1,9 +1,9 @@
 //! A Forgejo (or Gitea) repository's open issues and pull requests, read
 //! through the REST API under `/api/v1` in GitHub's row format:
 //! `native_id` is an issue's number and `pr/<number>` a pull request's,
-//! both shown `#<number>`, since Forgejo numbers them in one sequence. Every
-//! sync is a complete listing, so it may replace the cache. Nothing is ever
-//! written to Forgejo.
+//! both shown `#<number>`, since Forgejo numbers them in one sequence. Only
+//! complete active listings replace active rows. `history` keeps bounded
+//! settled samples separately. Nothing is ever written to Forgejo.
 //!
 //! A remote is Forgejo when its host's name holds `forgejo` or `gitea`, is
 //! `codeberg.org` (`named_by`), or is the host `FORGEJO_HOST` names
@@ -12,6 +12,7 @@
 //! read anonymously, which public repositories allow.
 
 mod error;
+pub mod history;
 pub mod issue;
 pub mod pull_request;
 pub mod search;

@@ -757,7 +757,10 @@ pub(crate) fn fixture_window(window: &mut Window, cx: &mut Context<SheprdWindow>
         // No AppKit event to read; a test that needs one supplies its own.
         key_press: || None,
         landing_launch: None,
+        kanban_order: Default::default(),
         key_layout: |_| None,
+        file_tree: crate::file_tree::FileTree::new(cx),
+        file_tree_width: crate::panel_resize::FILE_TREE,
         file_transfer: None,
         presentation: Default::default(),
         wake: crate::endpoint::WakeClock::new(
@@ -776,6 +779,7 @@ pub(crate) fn fixture_window(window: &mut Window, cx: &mut Context<SheprdWindow>
         hover_menu: None,
         local_error: None,
         local_ports: Default::default(),
+        walkr: Default::default(),
         menu: crate::menu::MenuState::new(cx),
         settings: Default::default(),
         integrations: Default::default(),

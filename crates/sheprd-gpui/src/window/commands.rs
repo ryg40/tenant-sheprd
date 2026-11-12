@@ -436,6 +436,10 @@ impl SheprdWindow {
                 self.open_git_menu(anchor, window, cx);
                 return;
             }
+            Command::ToggleSource => {
+                self.toggle_shown_source(window, cx);
+                return;
+            }
             Command::ToggleAnnotate => {
                 #[cfg(embedded_pages)]
                 self.toggle_shown_annotating(window, cx);
@@ -604,6 +608,10 @@ impl SheprdWindow {
             Command::ToggleModPanel => {
                 self.mods.set_panel_hidden(!self.mods.panel_hidden());
                 cx.notify();
+                return;
+            }
+            Command::ToggleFileExplorer => {
+                self.show_file_tree(!self.file_tree.is_open(), window, cx);
                 return;
             }
             Command::ToggleZenMode => {

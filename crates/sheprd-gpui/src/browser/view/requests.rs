@@ -82,6 +82,7 @@ impl SheprdWindow {
             location,
             focus,
             placement,
+            source,
         } = *opening;
         // Splitting needs the workspace's groups on screen: a workspace the
         // window does not show yet gets an ordinary tab.
@@ -99,6 +100,17 @@ impl SheprdWindow {
         let Some(id) = opened else {
             return Some(Placed::Full);
         };
+        // The request says how the file shows, also in a tab it reuses,
+        // and whether the view takes the keyboard.
+        match location {
+            crate::browser::Location::Local { .. } => {
+                self.show_file_source(id, source, focus, window, cx);
+            }
+            crate::browser::Location::Code { .. } => {
+                self.show_file_source(id, true, focus, window, cx);
+            }
+            _ => {}
+        }
         let beside = besides && self.show_beside(id, target.pane, focus, window, cx);
         if besides && !beside && focus {
             self.show_agent_tab(index, &workspace, id, window, cx);

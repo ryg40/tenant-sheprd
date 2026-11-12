@@ -2,7 +2,8 @@
 //! requests list shows it beside GitHub's.
 
 use super::{Listed, issue::Entry};
-use crate::{Item, PullRequest, SourceKey};
+use crate::{Item, PullRequest, SourceKey, kanban::history::Record};
+use chrono::{DateTime, Utc};
 use serde::Deserialize;
 
 /// One entry of `GET /repos/{owner}/{repo}/pulls`.
@@ -15,6 +16,7 @@ pub struct PullRequestNode {
     draft: bool,
     #[serde(default)]
     merged: bool,
+    merged_at: Option<DateTime<Utc>>,
     head: Branch,
     base: Branch,
     additions: Option<u64>,
@@ -39,6 +41,22 @@ struct Repository {
 }
 
 impl PullRequestNode {
+    pub(super) fn into_record(self, source: &SourceKey) -> Option<Record> {
+        if self.entry.state != "closed" {
+            return None;
+        }
+        let settled_at = if self.merged {
+            self.merged_at
+        } else {
+            self.entry.closed_at
+        };
+        let facts = self.entry.facts(settled_at);
+        Some(Record {
+            facts,
+            item: self.into_item(source)?,
+        })
+    }
+
     /// The state word the list filters and colors by.
     fn state(&self) -> &'static str {
         match self.entry.state.as_str() {

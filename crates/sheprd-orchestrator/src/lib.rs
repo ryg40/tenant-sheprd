@@ -21,6 +21,7 @@ pub mod forgejo;
 pub mod git;
 pub mod github;
 pub mod gitlab;
+pub mod kanban;
 pub mod location;
 pub mod model;
 pub mod naming;
@@ -35,6 +36,7 @@ pub mod store;
 
 pub use actions::{Action, DispatchRequest, Done};
 pub use error::{Error, Result};
+pub use kanban::BoardColumn;
 pub use location::{Repository, database_path};
 #[cfg(any(test, feature = "test-support"))]
 pub use model::Workspace;

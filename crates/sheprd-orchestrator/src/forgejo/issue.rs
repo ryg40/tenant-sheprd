@@ -2,7 +2,13 @@
 //! request both carry.
 
 use super::Listed;
-use crate::{Activity, Item, ItemKey, SourceKey};
+use crate::{
+    Activity, Item, ItemKey, SourceKey,
+    kanban::{
+        facts::{LabelCompleteness, NativeStateProvenance, WorkflowFacts},
+        history::Record,
+    },
+};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, de::IgnoredAny};
 
@@ -28,6 +34,7 @@ pub(super) struct Entry {
     html_url: String,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
+    pub(super) closed_at: Option<DateTime<Utc>>,
     user: Option<User>,
     /// Forgejo sends `null` rather than an empty list where there are none.
     labels: Option<Vec<Label>>,
@@ -37,6 +44,14 @@ pub(super) struct Entry {
 }
 
 impl Entry {
+    pub(super) fn facts(&self, settled_at: Option<DateTime<Utc>>) -> WorkflowFacts {
+        WorkflowFacts {
+            labels: self.labels.as_ref().map(|_| LabelCompleteness::Complete),
+            native_state: Some(NativeStateProvenance::Tracker),
+            settled_at,
+        }
+    }
+
     /// The row keyed `native_id`, shown `#<number>`: Forgejo numbers issues
     /// and pull requests in one sequence, and writes both that way.
     pub(super) fn into_item(self, source: &SourceKey, native_id: String) -> Item {
@@ -89,6 +104,19 @@ pub struct IssueNode {
     /// Set on a pull request, which `type=issues` leaves out; one listed
     /// anyway is skipped, since the pull request listing has it.
     pull_request: Option<IgnoredAny>,
+}
+
+impl IssueNode {
+    pub(super) fn into_record(self, source: &SourceKey) -> Option<Record> {
+        if self.entry.state != "closed" {
+            return None;
+        }
+        let facts = self.entry.facts(self.entry.closed_at);
+        Some(Record {
+            facts,
+            item: self.into_item(source)?,
+        })
+    }
 }
 
 impl Listed for IssueNode {

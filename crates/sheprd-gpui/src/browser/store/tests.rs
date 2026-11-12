@@ -5,6 +5,7 @@ mod asked;
 mod editors;
 mod orchestrator_tabs;
 mod px0;
+mod reserved_ids;
 #[cfg(servo_pages)]
 mod untitled;
 
@@ -138,7 +139,7 @@ fn saved_tabs_round_trip_and_invalid_files_are_rejected() {
     let restored = Store::with_tabs(parse(&bytes).unwrap(), None);
     assert_eq!(restored.tabs, store.tabs);
     // New tabs never reuse a restored ID.
-    assert!(restored.next > id.0);
+    assert!(restored.next.is_some_and(|next| next > id.0));
     for invalid in [
         r#"{"tabs":[{"id":0,"scope":"local","workspace_id":"w","location":{"kind":"web","url":"file:///etc/passwd"},"title":""}]}"#,
         r#"{"tabs":[{"id":0,"scope":"local","workspace_id":"","location":{"kind":"web","url":"https://a.test/"},"title":""}]}"#,

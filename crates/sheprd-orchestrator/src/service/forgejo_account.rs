@@ -45,7 +45,7 @@ impl Service {
     }
 
     /// The service and the worker it will talk to, not yet started.
-    fn prepare_forgejo_account(
+    pub(super) fn prepare_forgejo_account(
         host: String,
         request: RemoteRequest,
     ) -> (Self, AccountWorker, mpsc::Receiver<Command>) {
@@ -55,12 +55,15 @@ impl Service {
         let cancelled = Arc::new(AtomicBool::new(false));
         let visible = Arc::new(AtomicBool::new(true));
         let snapshot = request.scope.snapshot();
+        let moves = super::Moves::new(super::kanban::moves::shared_gate(), Arc::default());
         let worker = AccountWorker {
             cancelled: cancelled.clone(),
             cooldown: None,
             failures: 0,
             host,
+            history: super::kanban::History::default(),
             mailbox: mailbox.clone(),
+            moves: moves.clone(),
             notices: notices.clone(),
             opened: false,
             retry_until: None,
@@ -70,6 +73,7 @@ impl Service {
             visible: visible.clone(),
         };
         let service = Self {
+            moves,
             commands,
             mailbox,
             notices,
@@ -80,13 +84,15 @@ impl Service {
     }
 }
 
-struct AccountWorker {
+pub(super) struct AccountWorker {
     cancelled: Arc<AtomicBool>,
     cooldown: Option<Duration>,
     /// Failed syncs in a row, which lengthen the wait.
     failures: u32,
     host: String,
+    history: super::kanban::History,
     mailbox: Arc<Mutex<Option<Snapshot>>>,
+    moves: super::Moves,
     notices: Arc<Mutex<VecDeque<Notice>>>,
     /// Whether opening the database was tried; it is not tried again.
     opened: bool,
@@ -102,6 +108,7 @@ impl AccountWorker {
     fn run(mut self, commands: &mpsc::Receiver<Command>) {
         self.publish();
         self.sync();
+        self.sync_history();
         let Timing { reload, sync } = self.request.timing;
         let mut last_sync = Instant::now();
         while !self.cancelled.load(Ordering::Relaxed) {
@@ -110,7 +117,9 @@ impl AccountWorker {
             let wait = reload.min(next_sync.saturating_duration_since(Instant::now()));
             match commands.recv_timeout(wait) {
                 Ok(Command::Refresh(_)) => {
+                    self.moves.cancel_unconfirmed();
                     self.retry_until = None;
+                    self.history.refresh();
                     self.sync();
                     last_sync = Instant::now();
                 }
@@ -139,12 +148,21 @@ impl AccountWorker {
                 Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => return,
             }
+            if !self.moves.take_invalidated().is_empty() {
+                self.sync();
+            }
+            self.sync_history();
+            if self.moves.take_changed() {
+                self.publish();
+            }
         }
     }
 
     fn publish(&self) {
         if let Ok(mut mailbox) = self.mailbox.lock() {
-            *mailbox = Some(self.snapshot.clone());
+            let mut snapshot = self.snapshot.clone();
+            snapshot.moves = Arc::new(self.moves.snapshot());
+            *mailbox = Some(snapshot);
         }
     }
 
@@ -158,16 +176,21 @@ impl AccountWorker {
     /// sync: the login shell is probed once per run, so a change there
     /// takes a restart, as a checkout's Forgejo source's does. A
     /// `FORGEJO_HOST` that names a path is refused, and nothing is sent.
-    fn token(&self) -> Result<Option<SecretString>, forgejo::Error> {
-        if !self.request.look_up_token {
-            return Ok(None);
-        }
-        forgejo::account_token(&self.host, sheprd_client::login_env::var)
+    fn token(host: &str, look_up: bool) -> Result<SecretString, forgejo::Error> {
+        let token = if look_up {
+            forgejo::account_token(host, sheprd_client::login_env::var)?
+        } else {
+            None
+        };
+        token.ok_or_else(|| forgejo::Error::SignIn {
+            repository: host.to_owned(),
+            host: host.to_owned(),
+        })
     }
 
     /// Opens the account's database and shows what its last complete
     /// listing stored. Without one, listings are shown and not stored.
-    fn open(&mut self) {
+    pub(super) fn open(&mut self) {
         self.opened = true;
         let repository = Repository::ForgejoAccount {
             host: self.host.clone(),
@@ -187,6 +210,7 @@ impl AccountWorker {
         match opened {
             Ok((items, store)) => {
                 self.snapshot.items = Arc::new(items);
+                self.snapshot.history_error = self.history.load(&store).err().map(Arc::new);
                 self.store = Some(store);
             }
             Err(error) => tracing::warn!(
@@ -197,16 +221,53 @@ impl AccountWorker {
         }
     }
 
+    pub(super) fn sync_history(&mut self) {
+        let collection = crate::kanban::history::Collection::ForgejoAccount {
+            host: self.host.clone(),
+        };
+        let changed = self.history.read(
+            collection,
+            super::kanban::ReadContext {
+                active: &self.snapshot.items,
+                blocked_until: self.retry_until,
+                now: Instant::now(),
+                observed_at: Utc::now(),
+                store: self.store.as_mut(),
+                visible: self.visible.load(Ordering::Relaxed),
+            },
+            |cooldown| {
+                let token = Self::token(&self.host, self.request.look_up_token)?;
+                forgejo::history::account(
+                    &self.host,
+                    &token,
+                    forgejo::history::cutoff(Utc::now()),
+                    &|| self.cancelled.load(Ordering::Relaxed),
+                    cooldown,
+                )
+                .map(Some)
+            },
+        );
+        if changed {
+            self.history
+                .reconcile(self.store.as_mut(), &self.snapshot.items, Utc::now());
+            self.history.publish(&mut self.snapshot, Utc::now());
+            self.publish();
+        }
+    }
+
     fn sync(&mut self) {
-        let token = match self.token() {
-            Ok(Some(token)) => token,
-            Ok(None) => {
-                self.fail(forgejo::Error::SignIn {
-                    repository: self.host.clone(),
-                    host: self.host.clone(),
-                });
-                return;
-            }
+        let collection = crate::kanban::history::Collection::ForgejoAccount {
+            host: self.host.clone(),
+        };
+        if self
+            .history
+            .provider_until(&collection)
+            .is_some_and(|until| Instant::now() < until)
+        {
+            return;
+        }
+        let token = match Self::token(&self.host, self.request.look_up_token) {
+            Ok(token) => token,
             Err(error) => {
                 self.fail(error);
                 return;
@@ -223,6 +284,7 @@ impl AccountWorker {
         self.publish();
         self.cooldown = None;
         let started = Instant::now();
+        let fences = self.moves.read_fences();
         let cancelled = &self.cancelled;
         let read = forgejo::search::sync(
             &self.host,
@@ -259,7 +321,13 @@ impl AccountWorker {
                 SyncState::Failed(Arc::new(error))
             }
         };
+        if matches!(state, SyncState::Synced { .. } | SyncState::Capped { .. }) {
+            for fence in fences {
+                self.moves.observe_items(&fence, &self.snapshot.items);
+            }
+        }
         self.set_state(state);
+        self.history.publish(&mut self.snapshot, Utc::now());
         self.publish();
     }
 
@@ -272,10 +340,12 @@ impl AccountWorker {
     /// Shows `listing`, and stores it when it is complete and the database
     /// is writable. A capped one is shown and not written, so the last
     /// complete listing is what the next start shows.
-    fn keep(&mut self, listing: Listing) -> Result<SyncState> {
+    pub(super) fn keep(&mut self, listing: Listing) -> Result<SyncState> {
         let count = listing.items.len();
         let items = Arc::new(listing.items);
         self.snapshot.items = items.clone();
+        self.history
+            .reconcile(self.store.as_mut(), &items, Utc::now());
         if !listing.complete {
             return Ok(SyncState::Capped { count });
         }

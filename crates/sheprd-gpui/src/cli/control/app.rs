@@ -86,8 +86,13 @@ fn size(text: std::ffi::OsString) -> Result<Size, CliError> {
 }
 
 /// The panel names `ui panel` takes, as its errors and help name them.
-const PANELS: &str =
-    "workspaces|overview|pull-requests|issues|tasks|security|automations|ports|usage";
+static PANELS: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    crate::sidebar::ActivityPanel::ALL
+        .iter()
+        .map(|panel| panel.name())
+        .collect::<Vec<_>>()
+        .join("|")
+});
 
 pub(super) fn ui(args: &mut Args) -> Result<UiCommand, CliError> {
     let verb = args.verb().ok_or(CliError::MissingArgument {
@@ -98,10 +103,10 @@ pub(super) fn ui(args: &mut Args) -> Result<UiCommand, CliError> {
         Some("sidebar") => UiCommand::Sidebar(switch(args.positional())?),
         Some("statusbar" | "status-bar") => UiCommand::StatusBar(switch(args.positional())?),
         Some("panel") => {
-            let name = args.required_text(PANELS)?;
+            let name = args.required_text(&PANELS)?;
             UiCommand::Panel(
                 crate::sidebar::ActivityPanel::parse(&name)
-                    .ok_or(CliError::InvalidValue(PANELS))?,
+                    .ok_or(CliError::InvalidValue(&PANELS))?,
             )
         }
         Some("agent-group") => match args.optional_text()? {

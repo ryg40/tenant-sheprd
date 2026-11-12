@@ -1,12 +1,15 @@
+use crate::orchestrator::view::kanban::order;
 use crate::{SheprdWindow, config::Config};
 use chrono::{DateTime, Utc};
 use gpui::*;
+use sheprd_orchestrator::kanban::identity::LaneKey;
 use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
 impl SheprdWindow {
@@ -115,29 +118,44 @@ impl AgentSort {
 /// The window chrome this endpoint remembers between runs.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Chrome {
-    /// The activity bar's panel; `None` before one was picked.
-    pub activity_panel: Option<crate::sidebar::ActivityPanel>,
+    // keep-sorted start
     /// When each activity bar section was last open, so its count shows in
     /// the accent only for what changed since.
     pub activity_last_opened: HashMap<crate::sidebar::ActivityPanel, DateTime<Utc>>,
-    pub sidebar_width: Option<f32>,
-    pub sidebar_split: Option<f32>,
+    /// The activity bar's panel; `None` before one was picked.
+    pub activity_panel: Option<crate::sidebar::ActivityPanel>,
     /// The sort the user picked with the panel toggle, like upstream's
     /// `agent_panel_sort` preference. `None` follows the daemon's config.
     pub agent_sort: Option<AgentSort>,
-    /// The notes panel's width, once dragged; `None` is its default.
-    pub notes_width: Option<f32>,
-    /// The mod panel's width, once dragged.
-    pub mod_panel_width: Option<f32>,
-    /// The review's file list's width, once dragged.
-    pub review_files_width: Option<f32>,
     /// The device IDs in the order the user dragged them into.
     pub device_order: Vec<String>,
+    pub kanban_lane_order: Vec<LaneKey>,
+    /// The mod panel's width, once dragged.
+    pub mod_panel_width: Option<f32>,
+    /// The notes panel's width, once dragged; `None` is its default.
+    pub notes_width: Option<f32>,
+    /// The review's file list's width, once dragged.
+    pub review_files_width: Option<f32>,
+    pub sidebar_split: Option<f32>,
+    pub sidebar_width: Option<f32>,
+    // keep-sorted end
+}
+
+pub struct SaveOutcome {
+    pub result: crate::Result<()>,
+    pub revision: u64,
+}
+
+struct Save {
+    chrome: Chrome,
+    revision: u64,
 }
 
 pub struct Preferences {
-    saves: Option<Sender<Chrome>>,
-    loaded: Option<Receiver<Chrome>>,
+    loaded: Option<Receiver<crate::Result<Chrome>>>,
+    outcome: Arc<Mutex<Option<SaveOutcome>>>,
+    revision: AtomicU64,
+    saves: Option<Sender<Save>>,
     worker: Option<JoinHandle<()>>,
 }
 
@@ -151,39 +169,44 @@ impl Preferences {
     }
 
     fn start(path: crate::Result<PathBuf>) -> Self {
-        let (saves, requests) = mpsc::channel();
+        let (saves, requests) = mpsc::channel::<Save>();
+        let outcome = Arc::new(Mutex::new(None));
+        let saved = outcome.clone();
         let (loaded_tx, loaded) = mpsc::channel();
         let worker = thread::Builder::new()
             .name("gpui-preferences".into())
             .spawn(move || {
                 let path = match path {
                     Ok(path) => path,
-                    Err(_) => {
+                    Err(error) => {
                         tracing::warn!(
                             category = "preferences_location",
                             "Cannot locate GPUI preferences"
                         );
-                        let _ = loaded_tx.send(Chrome::default());
+                        let _ = loaded_tx.send(Err(error));
                         return;
                     }
                 };
-                let chrome = match read_chrome(&path) {
-                    Ok(chrome) => chrome,
-                    Err(_) => {
-                        tracing::warn!(
-                            category = "preferences_read",
-                            "Cannot read GPUI preferences"
-                        );
-                        Chrome::default()
-                    }
-                };
+                let chrome = read_chrome(&path).inspect_err(|_| {
+                    tracing::warn!(
+                        category = "preferences_read",
+                        "Cannot read GPUI preferences"
+                    );
+                });
                 let _ = loaded_tx.send(chrome);
-                for chrome in requests {
-                    if write_chrome(&path, chrome).is_err() {
+                for save in requests {
+                    let result = write_chrome(&path, save.chrome);
+                    if result.is_err() {
                         tracing::warn!(
                             category = "preferences_write",
                             "Cannot save GPUI preferences"
                         );
+                    }
+                    if let Ok(mut latest) = saved.lock() {
+                        *latest = Some(SaveOutcome {
+                            result,
+                            revision: save.revision,
+                        });
                     }
                 }
             });
@@ -195,34 +218,53 @@ impl Preferences {
             }
         };
         Self {
-            saves: Some(saves),
             loaded: Some(loaded),
+            outcome,
+            revision: AtomicU64::new(0),
+            saves: Some(saves),
             worker,
         }
     }
 
     /// Takes the initial result once; `None` means pending or already taken.
-    /// Defaults stand in for a failed initial load.
-    pub fn loaded(&mut self) -> Option<Chrome> {
+    /// A missing file is a successful default; unreadable contents remain unknown.
+    pub fn loaded(&mut self) -> Option<crate::Result<Chrome>> {
         let result = match self.loaded.as_ref()?.try_recv() {
             Ok(chrome) => Some(chrome),
             Err(TryRecvError::Empty) => return None,
-            Err(TryRecvError::Disconnected) => Some(Chrome::default()),
+            Err(TryRecvError::Disconnected) => {
+                Some(Err(io::Error::from(io::ErrorKind::BrokenPipe).into()))
+            }
         };
         self.loaded = None;
         result
     }
 
     /// Queues the whole chrome, so saving one field never drops the others.
-    pub fn save(&self, chrome: Chrome) {
-        if let Some(saves) = &self.saves
-            && saves.send(chrome).is_err()
+    pub fn save(&self, chrome: Chrome) -> u64 {
+        let revision = self.revision.fetch_add(1, Ordering::Relaxed) + 1;
+        if self
+            .saves
+            .as_ref()
+            .is_none_or(|saves| saves.send(Save { chrome, revision }).is_err())
         {
             tracing::warn!(
                 category = "preferences_worker_disconnected",
                 "Cannot queue GPUI preferences save"
             );
+            if let Ok(mut latest) = self.outcome.lock() {
+                *latest = Some(SaveOutcome {
+                    result: Err(io::Error::from(io::ErrorKind::BrokenPipe).into()),
+                    revision,
+                });
+            }
         }
+        revision
+    }
+
+    /// One latest result, never a growing event queue or a UI-thread wait.
+    pub fn saved(&self) -> Option<SaveOutcome> {
+        self.outcome.try_lock().ok()?.take()
     }
 }
 
@@ -285,18 +327,27 @@ fn read_chrome(path: &Path) -> crate::Result<Chrome> {
             .filter(|width| width.is_finite() && *width > 0.0)
     };
     Ok(Chrome {
+        activity_last_opened: last_opened(object.get("activity_last_opened_at")),
         activity_panel: object
             .get("activity_panel")
             .and_then(serde_json::Value::as_str)
             .and_then(crate::sidebar::ActivityPanel::parse),
-        activity_last_opened: last_opened(object.get("activity_last_opened_at")),
-        sidebar_width,
-        sidebar_split,
         agent_sort,
-        notes_width: panel_width("notes_width_px"),
-        mod_panel_width: panel_width("mod_panel_width_px"),
-        review_files_width: panel_width("review_files_width_px"),
         device_order: device_order(object.get("device_order")),
+        kanban_lane_order: order::bounded(
+            object
+                .get("kanban_lane_order")
+                .and_then(serde_json::Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(serde_json::Value::as_str)
+                .filter_map(order::parse),
+        ),
+        mod_panel_width: panel_width("mod_panel_width_px"),
+        notes_width: panel_width("notes_width_px"),
+        review_files_width: panel_width("review_files_width_px"),
+        sidebar_split,
+        sidebar_width,
     })
 }
 
@@ -383,6 +434,7 @@ fn write_chrome(path: &Path, chrome: Chrome) -> crate::Result<()> {
                     .review_files_width
                     .filter(|width| width.is_finite() && *width > 0.0),
                 "device_order": chrome.device_order,
+                "kanban_lane_order": order::bounded(chrome.kanban_lane_order).iter().map(LaneKey::canonical).collect::<Vec<_>>(),
             }),
         )?;
         file.write_all(b"\n")?;

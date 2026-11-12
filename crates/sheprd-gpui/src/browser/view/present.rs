@@ -57,9 +57,19 @@ impl SheprdWindow {
     pub(crate) fn present_browser(&mut self, cx: &mut Context<Self>) -> bool {
         #[cfg(embedded_pages)]
         {
-            self.browser.pages.set_theme(&self.theme);
-            let mut live = self.live_pages(cx);
-            live.extend(self.shown_chat_pages());
+            self.theme_pages(cx);
+            let mut live = Vec::new();
+            if self.activity_section().is_none() && self.mod_app().is_none() {
+                live.extend(self.live_pages(cx));
+                live.extend(self.shown_chat_pages());
+            }
+            if self.activity_section() == Some(crate::sidebar::ActivityPanel::Walkr)
+                && self.mod_app().is_none()
+                && self.browser.pages.contains(crate::browser::TabId::WALKR)
+                && self.walkr.page_visible()
+            {
+                live.push(crate::browser::TabId::WALKR);
+            }
             // A tab's zoom may change in any window, or from the command
             // line, so each window's pages follow the store as they show.
             if let Some(store) = super::store(cx) {

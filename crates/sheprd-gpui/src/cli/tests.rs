@@ -10,6 +10,8 @@ mod cloud_exec;
 mod cloud_images;
 mod cloud_setup;
 mod control_commands;
+mod files;
+mod kanban;
 mod language;
 mod links;
 mod local_ports;
@@ -22,6 +24,7 @@ mod remote;
 mod security;
 mod ui_agent_group;
 mod ui_panel;
+mod walkr;
 
 #[test]
 fn build_info_is_an_informational_mode() {
@@ -63,6 +66,17 @@ fn browser_commands_never_start_the_gui() {
             workspace: None,
             focus: true,
             placement: None,
+            source: false,
+        })
+    );
+    assert_eq!(
+        mode(&["browser", "open", "notes.md", "--source"]).unwrap(),
+        browser(BrowserCommand::Open {
+            target: "notes.md".into(),
+            workspace: None,
+            focus: true,
+            placement: None,
+            source: true,
         })
     );
     assert_eq!(
@@ -72,6 +86,7 @@ fn browser_commands_never_start_the_gui() {
             workspace: None,
             focus: true,
             placement: Some(control::Placement::Beside),
+            source: false,
         })
     );
     assert_eq!(
@@ -81,6 +96,7 @@ fn browser_commands_never_start_the_gui() {
             workspace: None,
             focus: true,
             placement: Some(control::Placement::Tab),
+            source: false,
         })
     );
     assert_eq!(
@@ -98,6 +114,7 @@ fn browser_commands_never_start_the_gui() {
             workspace: Some("w_2".into()),
             focus: false,
             placement: None,
+            source: false,
         })
     );
     assert_eq!(

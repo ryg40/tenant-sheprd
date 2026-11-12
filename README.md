@@ -135,6 +135,8 @@ Also included: saved SSH hosts with [file copies](crates/sheprd-gpui/README.md#s
 [clickable links](crates/sheprd-gpui/README.md#terminal-links),
 [code navigation](crates/sheprd-gpui/README.md#code-navigation) that jumps to a
 symbol, file, or printed `path:line` in your terminal editor,
+a [file explorer](website/docs/editors.md#file-explorer) of the focused
+pane's checkout,
 [file drops](crates/sheprd-gpui/README.md#file-drops),
 [editor groups](crates/sheprd-gpui/README.md#editor-groups), and
 [system notifications](crates/sheprd-gpui/README.md#system-notifications),

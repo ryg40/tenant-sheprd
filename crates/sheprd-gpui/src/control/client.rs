@@ -5,14 +5,17 @@ mod app;
 mod browser;
 mod chat;
 mod events;
+mod files;
 mod help;
 mod hosts;
+mod kanban;
 mod local;
 mod mods;
 mod open;
 mod remote;
 mod settings;
 mod tabs;
+mod walkr;
 mod work;
 
 use super::{
@@ -464,6 +467,8 @@ pub(crate) fn run(invocation: Invocation) -> ExitCode {
         ControlCommand::Automation(command) => hosts::automation(command, &context),
         ControlCommand::Remote(command) => remote::remote(command, &context),
         ControlCommand::Mod(command) => mods::run(command, &context),
+        ControlCommand::Walkr(op) => walkr::run(op, &context),
+        ControlCommand::Files(command) => files::run(command, &context),
         ControlCommand::Search {
             files,
             query,

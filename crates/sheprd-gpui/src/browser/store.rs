@@ -24,6 +24,10 @@ impl TabId {
 }
 
 impl TabId {
+    /// Chats increment opened_pages before use, so their first page is 1 and 0 is free.
+    #[cfg(any(embedded_pages, test))]
+    pub(crate) const WALKR: Self = Self::panel(0);
+
     /// The `n`th page a chat shows in a message. Store tabs count up from
     /// one, so these count down from the top and the two never meet.
     #[cfg(any(embedded_pages, test))]
@@ -35,8 +39,7 @@ impl TabId {
         self.0
     }
 
-    /// Whether this is a chat's page rather than a store tab.
-    #[cfg(any(embedded_pages, test))]
+    /// Whether this is a section or chat page rather than a store tab.
     pub(crate) const fn is_panel(self) -> bool {
         self.0 > u64::MAX / 2
     }
@@ -176,6 +179,15 @@ impl Tab {
             {
                 self.title.clone()
             }
+            // A Markdown file's tab bears the file's name, as a code tab
+            // does: its page's title is only its first heading. An HTML
+            // page keeps the title it gave itself, as an agent's mockup
+            // does, and has the file's name until it gives one.
+            Some(location @ Location::Local { file })
+                if super::file_view::is_markdown(&file.path()) =>
+            {
+                location.default_title()
+            }
             Some(location) => location.drawn_title().unwrap_or_else(|| self.title.clone()),
         }
     }
@@ -204,15 +216,20 @@ struct Saved {
     asked: asked::Asked,
 }
 
-#[derive(Default)]
 pub(crate) struct Store {
     tabs: Vec<Tab>,
     /// The address each tab was asked for, while a site sent it elsewhere.
     asked: asked::Asked,
-    next: u64,
+    next: Option<u64>,
     pub(super) closed: super::closed::ClosedTabs,
     writer: Option<state_file::Writer<Saved>>,
     quitting: bool,
+}
+
+impl Default for Store {
+    fn default() -> Self {
+        Self::with_saved(Saved::default(), None)
+    }
 }
 
 impl Global for Store {}
@@ -280,6 +297,12 @@ impl Store {
         Self::with_saved(Saved { tabs, asked }, writer)
     }
 
+    /// The store a restart makes from a saved file, without a writer.
+    #[cfg(all(test, servo_pages))]
+    pub(crate) fn restored(bytes: &[u8]) -> crate::Result<Self> {
+        read(bytes).map(|saved| Self::with_saved(saved, None))
+    }
+
     fn with_saved(saved: Saved, writer: Option<state_file::Writer<Saved>>) -> Self {
         let Saved { mut tabs, asked } = saved;
         // A tab that a site sent away, as a sign-in does, starts again on
@@ -287,8 +310,16 @@ impl Store {
         asked.restore(&mut tabs);
         // Earlier builds hosted the orchestrator in a tab; its sections now
         // own it, so such tabs are dropped rather than restored.
-        tabs.retain(|tab| !matches!(tab.location, Some(Location::Orchestrator { .. })));
-        let next = tabs.iter().map(|tab| tab.id.0 + 1).max().unwrap_or(0);
+        tabs.retain(|tab| {
+            !tab.id.is_panel() && !matches!(tab.location, Some(Location::Orchestrator { .. }))
+        });
+        let next = tabs
+            .iter()
+            .map(|tab| tab.id.0)
+            .max()
+            .map_or(Some(0), |last| last.checked_add(1))
+            .filter(|next| !TabId(*next).is_panel());
+        let asked = asked.of(&tabs);
         Self {
             tabs,
             asked,
@@ -449,8 +480,8 @@ impl Store {
         if self.tabs.len() >= MAX_TABS {
             return None;
         }
-        let id = TabId(self.next);
-        self.next += 1;
+        let id = TabId(self.next?);
+        self.next = id.0.checked_add(1).filter(|next| !TabId(*next).is_panel());
         tab.id = id;
         self.tabs.push(tab);
         self.save();

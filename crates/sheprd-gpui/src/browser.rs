@@ -7,7 +7,8 @@
 //! overlays reaches. On Linux, with the `servo` feature, Servo draws a page
 //! offscreen and the window paints it as an image; without the feature a
 //! page opens in the system browser. Each workspace may also show VS Code in
-//! a panel to the right of its groups, or as a tab in its groups.
+//! a panel to the right of its groups, or as a tab in its groups. Chats and
+//! the Walkr section own pages outside the saved tab store.
 // i18n: migrated
 
 #[cfg(any(embedded_pages, test))]
@@ -33,6 +34,7 @@ pub(crate) mod engine;
 #[cfg(embedded_pages)]
 mod favicon;
 mod feedback;
+pub(crate) mod file_view;
 mod group_motion;
 mod groups;
 mod groups_view;
@@ -51,6 +53,8 @@ mod offscreen;
 mod page;
 #[cfg(target_os = "macos")]
 mod page_keys;
+#[cfg(embedded_pages)]
+mod panel_pages;
 #[cfg(target_os = "macos")]
 mod parking;
 #[cfg(any(embedded_pages, test))]
@@ -86,6 +90,7 @@ pub(crate) use closed::ClosedHerdrTab;
 pub(crate) use editor::Editor;
 pub(crate) use feedback::{Batch, Feedback, FeedbackKey};
 pub(crate) use feedback::{TAKE_BUDGET, json_size};
+pub(crate) use file_view::{FileViews, browser_view};
 pub(crate) use group_motion::Fold;
 #[cfg(test)]
 pub(crate) use groups::GroupIds;

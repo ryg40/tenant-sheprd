@@ -7,12 +7,15 @@ mod browser;
 mod chat;
 mod cloud;
 mod events;
+mod files;
 mod hosts;
+mod kanban;
 mod links;
 mod mods;
 mod remote;
 mod settings;
 mod tabs;
+mod walkr;
 mod work;
 
 use super::{
@@ -249,6 +252,9 @@ fn named_window(request: &Request) -> Option<u64> {
         Request::Cloud(call) => call.caller.window,
         Request::Remote(call) => call.caller.window,
         Request::Mod(call) => call.caller.window,
+        Request::Walkr(call) => call.caller.window,
+        Request::Files(call) => call.caller.window,
+        Request::Orchestrator(call) => call.caller.window,
     }
 }
 
@@ -262,6 +268,8 @@ fn serve(incoming: socket::Incoming, state: &mut State, cx: &mut App) {
             | Request::Events(_)
             | Request::Cloud(_)
             | Request::Remote(_)
+            | Request::Walkr(_)
+            | Request::Files(_)
     );
     if let Some(id) = named_window(&incoming.request)
         && !main_windows(cx)
@@ -298,6 +306,9 @@ fn serve(incoming: socket::Incoming, state: &mut State, cx: &mut App) {
         Request::Cloud(call) => cloud::serve(call, incoming, &mut state.watches, cx),
         Request::Remote(call) => remote::serve(call, incoming, &mut state.watches, cx),
         Request::Mod(call) => incoming.respond(mods::serve(call, cx)),
+        Request::Walkr(call) => walkr::serve(call, incoming, &mut state.watches, cx),
+        Request::Files(call) => files::serve(call, incoming, &mut state.watches, cx),
+        Request::Orchestrator(call) => incoming.respond(kanban::serve(call, cx)),
     }
 }
 

@@ -80,6 +80,18 @@ impl SheprdWindow {
         self.local_ports.poll(shown, std::time::Instant::now())
     }
 
+    pub(crate) fn update_walkr(&mut self, cx: &mut Context<Self>) -> bool {
+        let shown = self.activity_section() == Some(crate::sidebar::ActivityPanel::Walkr)
+            && self.mod_app().is_none();
+        let panes = self.forget_walkr_panes();
+        let changed = self
+            .walkr
+            .poll(shown, &self.config.walkr, std::time::Instant::now())
+            || panes;
+        self.check_walkr_history(cx);
+        changed
+    }
+
     /// The machines background monitors watch: this one always, a remote
     /// host while it is connected, so a dropped host is not dialled every
     /// few seconds.

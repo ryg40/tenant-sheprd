@@ -22,6 +22,7 @@ use protocol::Caller;
 pub use protocol::ErrorCode;
 pub(crate) use protocol::NotesTo;
 pub(crate) use protocol::Response;
+pub(crate) use protocol::SourceWhy;
 pub(crate) use protocol::cloud as batch;
 pub use protocol::{
     app::{FontSize, Size, Switch},
@@ -82,6 +83,8 @@ pub(crate) struct Opening<'a> {
     /// Whether the window switches to the tab.
     pub focus: bool,
     pub placement: Placement,
+    /// Whether a local file opens as its source.
+    pub source: bool,
 }
 
 /// Where a window opened a requested tab.

@@ -164,6 +164,8 @@ pub enum Error {
     #[error("{0}")]
     Json(#[from] serde_json::Error),
     #[error(transparent)]
+    Kanban(#[from] crate::orchestrator::view::kanban::error::Error),
+    #[error(transparent)]
     Keymap(#[from] crate::keymap::Error),
     #[cfg(windows)]
     #[error(transparent)]
@@ -348,6 +350,8 @@ pub enum Error {
     /// to `GitHub`, where callers match it.
     #[error(transparent)]
     Vcs(sheprd_vcs::Error),
+    #[error(transparent)]
+    Walkr(#[from] crate::walkr::Error),
     #[cfg(any(target_os = "macos", windows))]
     #[error("Could not create the page: {0}")]
     WebView(#[from] wry::Error),

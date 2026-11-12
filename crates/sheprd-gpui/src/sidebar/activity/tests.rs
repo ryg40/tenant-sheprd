@@ -16,6 +16,7 @@ mod sections;
 mod startup_counts;
 mod tasks_section;
 mod toggle;
+mod walkr;
 
 fn item(native_id: &str, title: &str) -> Item {
     Item {

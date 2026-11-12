@@ -4,19 +4,14 @@
 //! each header folds its section, kept here so folding never runs Lua; and a
 //! mod whose view returns nil has no section. The panel shows while any mod
 //! has a section and the user has not hidden it (Toggle Mod Panel), slides in
-//! and out, and resizes from its left edge like the notes panel.
+//! and out, and resizes from its left edge like the notes panel. Its width and
+//! place come from `window::right_columns`, with the file explorer's.
 
 use super::render::{Axis, Painter};
-use crate::{SheprdWindow, motion, panel_resize::PanelDrag, window::chrome_focus::Region};
+use crate::{SheprdWindow, motion, window::chrome_focus::Region};
 use gpui::{prelude::*, *};
 use sheprd_mods::Place;
 use std::collections::BTreeSet;
-
-/// The least room the terminals keep beside the panel; past this the panel
-/// narrows, and below [`MIN_PANEL`] it steps aside.
-const MIN_CONTENT: f32 = 240.;
-/// The narrowest the panel is drawn.
-const MIN_PANEL: f32 = 160.;
 
 /// Whether the panel shows, and which sections are folded.
 #[derive(Debug, Default)]
@@ -37,6 +32,11 @@ impl super::Mods {
 
     pub(crate) fn set_panel_hidden(&mut self, hidden: bool) {
         self.panel.hidden = hidden;
+    }
+
+    /// The panel's slide, for the layout of the window's right-hand columns.
+    pub(crate) fn panel_motion(&self) -> &motion::Toggle {
+        &self.panel.motion
     }
 
     fn toggle_fold(&mut self, name: &str) {
@@ -74,83 +74,16 @@ impl SheprdWindow {
         was != open || self.mods.panel.motion.moving(now)
     }
 
-    /// The panel's width in this window: its chosen or default width,
-    /// capped by the room beside the sidebar so the terminals keep
-    /// [`MIN_CONTENT`]; `None` when that leaves less than [`MIN_PANEL`].
-    fn mod_panel_width_now(&self) -> Option<f32> {
-        let beside =
-            self.viewport_width - self.sidebar_column_width(self.viewport_width).unwrap_or(0.);
-        let width = self.mod_panel_width.width(beside).min(beside - MIN_CONTENT);
-        (width >= MIN_PANEL).then_some(width)
-    }
-
     /// Whether the panel is drawn now, opening or open, for the focus
     /// regions; only beside the terminals, never over a section or app.
     pub(crate) fn mod_panel_shown(&self) -> bool {
         self.mods.panel.motion.is_open()
-            && !self.zen_layout()
             && self.activity_section().is_none()
             && self.mod_app().is_none()
-            && self.mod_panel_width_now().is_some()
+            && self.right_column_widths().mods.is_some()
     }
 
-    /// `content` with the panel beside it on the right, while it shows.
-    /// Zen mode keeps the terminals alone, as it does with the sidebar.
-    pub(crate) fn with_mod_panel(
-        &self,
-        content: AnyElement,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let now = motion::now();
-        let shown = self.mods.panel.motion.shown(now);
-        if shown <= 0. || self.zen_layout() {
-            return content;
-        }
-        let Some(width) = self.mod_panel_width_now() else {
-            return content;
-        };
-        if self.mods.panel.motion.moving(now) {
-            window.request_animation_frame();
-        }
-        let panel = self
-            .resizable_panel(
-                self.render_mod_panel(cx),
-                "mod-panel-resize",
-                PanelDrag::ModPanel,
-                None,
-                cx,
-            )
-            // Narrowed to the room beside the sidebar, past the drag's cap.
-            .w(px(width));
-        // Clipped to the share that has slid in, revealed from its left edge.
-        let slide = div()
-            .relative()
-            .flex_none()
-            .h_full()
-            .w(px(width * shown))
-            .overflow_hidden()
-            .child(
-                div()
-                    .absolute()
-                    .top_0()
-                    .bottom_0()
-                    .left_0()
-                    .w(px(width))
-                    .child(panel),
-            );
-        div()
-            .flex()
-            .flex_1()
-            .size_full()
-            .min_w_0()
-            .min_h_0()
-            .child(div().flex().flex_1().min_w_0().min_h_0().child(content))
-            .child(slide)
-            .into_any_element()
-    }
-
-    fn render_mod_panel(&self, cx: &mut Context<Self>) -> Stateful<Div> {
+    pub(crate) fn render_mod_panel(&self, cx: &mut Context<Self>) -> Stateful<Div> {
         let theme = &self.theme;
         let size = self.config.ui.size;
         let sections: Vec<AnyElement> = self

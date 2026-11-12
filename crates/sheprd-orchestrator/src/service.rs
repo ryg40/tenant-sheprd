@@ -36,10 +36,13 @@ mod forgejo_account;
 mod forgejo_source;
 mod github_source;
 mod gitlab_source;
+mod kanban;
 pub mod remote;
+mod run;
 mod schedule;
 mod sources;
 
+pub use kanban::moves::{MovePhase, MoveStatus, Moves, ReadFence};
 pub use remote::{RemoteRequest, RemoteScope};
 pub use sources::sources;
 
@@ -206,6 +209,12 @@ pub struct Snapshot {
     pub repo: Option<RepoInfo>,
     pub access: Option<Access>,
     pub items: Arc<Vec<Item>>,
+    /// Retained outcomes and observations, independent of the notice queue.
+    pub moves: Arc<Vec<MoveStatus>>,
+    /// Separate history observations and freshness; never an active listing.
+    pub history: Arc<Vec<crate::kanban::history::Status>>,
+    /// Reading the history cache failed; active items and runs remain usable.
+    pub history_error: Option<Arc<Error>>,
     pub runs: Arc<Vec<Run>>,
     pub sessions: Arc<Vec<HerdrSession>>,
     pub sources: Vec<SourceStatus>,
@@ -241,6 +250,7 @@ pub struct Service {
     notices: Arc<Mutex<VecDeque<Notice>>>,
     cancelled: Arc<AtomicBool>,
     visible: Arc<AtomicBool>,
+    moves: Moves,
 }
 
 impl Service {
@@ -266,12 +276,15 @@ impl Service {
         // Shown until the view says otherwise, so a view opened on screen
         // never waits out the hidden period.
         let visible = Arc::new(AtomicBool::new(true));
+        let actions = Arc::new(AtomicUsize::new(0));
+        let moves = Moves::new(kanban::moves::shared_gate(), actions.clone());
         let worker = Worker {
             request,
+            moves: moves.clone(),
             mailbox: mailbox.clone(),
             notices: notices.clone(),
             commands: commands.clone(),
-            actions: Arc::new(AtomicUsize::new(0)),
+            actions,
             site: None,
             cancelled: cancelled.clone(),
             snapshot: Snapshot::default(),
@@ -290,8 +303,10 @@ impl Service {
             checks: HashMap::new(),
             remembered: HashMap::new(),
             failures: HashMap::new(),
+            history: kanban::History::default(),
         };
         let service = Self {
+            moves,
             commands,
             mailbox,
             notices,
@@ -347,7 +362,14 @@ impl Service {
 
     /// The newest snapshot since the last call, if any.
     pub fn poll(&self) -> Option<Snapshot> {
-        self.mailbox.lock().ok()?.take()
+        let mut snapshot = self.mailbox.lock().ok()?.take()?;
+        snapshot.moves = Arc::new(self.moves.snapshot());
+        Some(snapshot)
+    }
+
+    /// Move state for future provider and native dialog adapters. No writer is enabled.
+    pub fn moves(&self) -> &Moves {
+        &self.moves
     }
 }
 
@@ -356,6 +378,7 @@ impl Drop for Service {
         // The worker sees this at its next step or script check; it is never
         // joined here, on the UI thread.
         self.cancelled.store(true, Ordering::Relaxed);
+        self.moves.cancel_unconfirmed();
     }
 }
 
@@ -403,87 +426,22 @@ struct Worker {
     remembered: HashMap<SourceKey, github_source::Remembered>,
     /// Each source's failures in a row, which lengthen its wait.
     failures: HashMap<SourceKey, u32>,
+    history: kanban::History,
+    moves: Moves,
 }
 
 impl Worker {
-    fn run(mut self, commands: mpsc::Receiver<Command>) {
-        if let Err(error) = self.open() {
-            self.snapshot.error = Some(Arc::new(error));
-            self.publish();
-            return;
-        }
-        // The host was just found unreachable: the next sync looks again.
-        if !self.unreached {
-            let token = self.request.token.clone();
-            self.sync(token.as_ref());
-        }
-        let Timing { reload, sync } = self.request.timing;
-        let mut last_sync = Instant::now();
-        while !self.cancelled() {
-            let visible = self.visible.load(Ordering::Relaxed);
-            let next_sync = last_sync + schedule::period(sync, visible);
-            let wait = reload.min(next_sync.saturating_duration_since(Instant::now()));
-            match commands.recv_timeout(wait) {
-                Ok(Command::Refresh(token)) => {
-                    self.refreshed(token);
-                    let token = self.request.token.clone();
-                    self.sync(token.as_ref());
-                    last_sync = Instant::now();
-                }
-                Ok(Command::Stores(stores)) => {
-                    self.stores_changed(stores);
-                    let token = self.request.token.clone();
-                    self.sync(token.as_ref());
-                    last_sync = Instant::now();
-                }
-                Ok(Command::Act(action)) => self.act(action),
-                Ok(Command::LoadPullRequest(number)) => self.load_pull_request(number),
-                Ok(Command::LoadAgents { endpoint, target }) => {
-                    self.snapshot.installed_endpoint = endpoint;
-                    self.snapshot.installed = None;
-                    self.snapshot.installed_error = None;
-                    self.publish();
-                    let result = Host::new(&target)
-                        .map_err(|_| Error::UnsupportedHost)
-                        .and_then(|host| {
-                            ssh_slots::run(&target, &self.cancelled, || {
-                                installed(Some(&host), &self.cancelled)
-                            })
-                        });
-                    match result {
-                        Ok(agents) => self.snapshot.installed = Some(Arc::new(agents)),
-                        Err(error) => self.snapshot.installed_error = Some(Arc::new(error)),
-                    }
-                    self.publish();
-                }
-                Ok(Command::Acted { resync }) => {
-                    if resync {
-                        let token = self.request.token.clone();
-                        self.sync(token.as_ref());
-                    } else {
-                        self.reload_if_changed();
-                    }
-                }
-                Err(RecvTimeoutError::Timeout) if Instant::now() >= next_sync => {
-                    let token = self.request.token.clone();
-                    self.sync(token.as_ref());
-                    last_sync = Instant::now();
-                }
-                Err(RecvTimeoutError::Timeout) => self.reload_if_changed(),
-                Err(RecvTimeoutError::Disconnected) => return,
-            }
-        }
-    }
-
     /// Forgets what spaced out the next sync, so Refresh (or a new account)
     /// reads everything again: the token looked up, the sources' waits, and
     /// when their checks were last read, which a re-run check may not move.
     fn refreshed(&mut self, token: Option<Tokens>) {
+        self.moves.cancel_unconfirmed();
         self.request.token = token;
         self.gitlab_token = None;
         self.azure_token = None;
         self.retry.clear();
         self.checks.clear();
+        self.history.refresh();
     }
 
     /// Reads pasted tokens from `stores`, forgetting those read from the old
@@ -572,7 +530,9 @@ impl Worker {
 
     fn publish(&self) {
         if let Ok(mut mailbox) = self.mailbox.lock() {
-            *mailbox = Some(self.snapshot.clone());
+            let mut snapshot = self.snapshot.clone();
+            snapshot.moves = Arc::new(self.moves.snapshot());
+            *mailbox = Some(snapshot);
         }
     }
 
@@ -698,15 +658,18 @@ impl Worker {
 
     /// Drops a repository shown from the cache that git no longer finds.
     fn forget_repository(&mut self) {
+        self.moves.clear();
         self.store = None;
         self.site = None;
         self.data_version = None;
         self.snapshot = Snapshot::default();
+        self.history = kanban::History::default();
     }
 
     /// Opens `info`'s database, carrying agent-launcher's over the first
     /// time, and publishes what it holds.
     fn show(&mut self, info: RepoInfo, host: &Host) -> Result<()> {
+        self.moves.clear();
         let (path, legacy) = match &self.request.data_root {
             Some(root) => (
                 database_path_in(root, &info.repository),
@@ -744,6 +707,8 @@ impl Worker {
             tracing::debug!(%error, "Cannot read stored pull request checks");
             HashMap::new()
         }));
+        self.history = kanban::History::default();
+        self.snapshot.history_error = self.history.load(&store).err().map(Arc::new);
         self.store = Some(store);
         self.host = Some(host.clone());
         self.reload()?;
@@ -767,6 +732,10 @@ impl Worker {
         self.snapshot.items = Arc::new(items);
         self.snapshot.runs = Arc::new(store.runs()?);
         self.snapshot.sessions = Arc::new(store.sessions()?);
+        self.snapshot.history_error = self.history.load(store).err().map(Arc::new);
+        self.history
+            .reconcile(self.store.as_mut(), &self.snapshot.items, Utc::now());
+        self.history.publish(&mut self.snapshot, Utc::now());
         Ok(())
     }
 
@@ -824,7 +793,13 @@ impl Worker {
             }
             let now = Instant::now();
             self.retry.retain(|(_, until)| *until > now);
-            if !supported || self.retry.iter().any(|(waiting, _)| *waiting == key) {
+            if !supported
+                || self.retry.iter().any(|(waiting, _)| *waiting == key)
+                || self
+                    .history
+                    .provider_until(&crate::kanban::history::Collection::Repository(key.clone()))
+                    .is_some_and(|until| now < until)
+            {
                 continue;
             }
             self.set_syncing(&key);
@@ -832,6 +807,9 @@ impl Worker {
             // Only this source's own GitHub reply may set its pause: a delay
             // left by a pull request lookup or another source must not apply.
             self.cooldown = None;
+            let read_fence = crate::kanban::identity::LaneKey::try_from(&key)
+                .ok()
+                .and_then(|lane| self.moves.begin_read(&lane));
             let state = match self.sync_source(&key, token) {
                 // The view shows no sync times, so the log keeps them.
                 Ok(state) => {
@@ -871,9 +849,12 @@ impl Worker {
                     }
                 }
             };
+            let observed = matches!(state, SyncState::Synced { .. } | SyncState::Capped { .. });
             self.set_state(&key, state);
             if let Err(error) = self.reload() {
                 self.snapshot.error = Some(Arc::new(error));
+            } else if observed && let Some(fence) = read_fence {
+                self.moves.observe_items(&fence, &self.snapshot.items);
             }
             self.publish();
         }
@@ -932,6 +913,7 @@ impl Worker {
             return;
         };
         if recognize(&mut info, cli, named) {
+            self.moves.clear();
             self.snapshot.sources = statuses(&info);
             self.snapshot.repo = Some(info);
         }
@@ -950,7 +932,7 @@ pub fn cache_key(target: &ConnectTarget, checkout: &str) -> String {
 }
 
 /// Once accepted, an action completes even when its view stops observing it.
-fn spawn_action(
+pub(crate) fn spawn_action(
     action: impl FnOnce(&AtomicBool) + Send + 'static,
 ) -> std::io::Result<std::thread::JoinHandle<()>> {
     std::thread::Builder::new()

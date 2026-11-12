@@ -402,6 +402,14 @@ impl OrchestratorView {
 
     /// Hands `action` to the worker, or says why it could not take it.
     pub(super) fn act(&mut self, action: Action) {
+        if self.kanban.shown {
+            return;
+        }
+        #[cfg(test)]
+        if let Some(sink) = &self.action_sink {
+            let _ = sink.try_send(action);
+            return;
+        }
         let taken = self.service().is_some_and(|service| service.act(action));
         if !taken {
             self.notice = Some(Notice {

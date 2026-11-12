@@ -1,11 +1,11 @@
 //! `browser ...` and `feedback`.
 use super::{Context, Output, caller, notes_daemon, rejected, send, tabs, unexpected};
 use crate::{
-    browser::{LocalFile, WebUrl},
+    browser::{WebUrl, browser_view},
     cli::control::{BrowserCommand, Placement, ZoomChange},
     control::protocol::{
         BrowserOpen, Caller, ErrorCode, FeedbackRequest, MAX_WAIT_SECONDS, OpenedIn, Page, Request,
-        Response,
+        Response, SourceWhy,
         tabs::{Reply, TabOp},
     },
 };
@@ -20,8 +20,9 @@ fn page(target: &str) -> crate::Result<(Page, String)> {
     let path = Path::new(target);
     if !target.contains("://") && path.is_file() {
         let path = path.canonicalize()?;
+        // Refused here, before the app is asked: the app decides the same.
         let home = crate::config::home().ok();
-        LocalFile::new(&path, home.as_deref())?;
+        browser_view(&path, home.as_deref(), crate::browser::EMBEDDED, false)?;
         let text = path
             .to_str()
             .ok_or(crate::Error::InvalidLocalPage)?
@@ -43,14 +44,30 @@ pub(super) fn default_placement(page: &Page, caller: &Caller) -> Placement {
     }
 }
 
+/// How a file opened, when not as a page: an agent that reads "Opened"
+/// must not take a file's source for the page it meant to show.
+fn opened_as(why: Option<SourceWhy>) -> &'static str {
+    match why {
+        None => "",
+        Some(SourceWhy::Asked) => " as source",
+        Some(SourceWhy::Folder) => {
+            " as source, not as a page (its folder is hidden, or is your home folder)"
+        }
+        Some(SourceWhy::Build) => " as source, not as a page (this build cannot render pages)",
+    }
+}
+
 fn open(
     target: &str,
     workspace: Option<String>,
     focus: bool,
     placement: Option<Placement>,
+    source: bool,
     context: &Context,
 ) -> crate::Result<Output> {
     let (page, shown) = page(target)?;
+    // Only a file has a source the app shows; a web page's stays its own.
+    let source = source && matches!(page, Page::File(_));
     let caller = Caller {
         window: context.window,
         ..caller(workspace)?
@@ -61,6 +78,7 @@ fn open(
         caller,
         focus,
         placement,
+        source,
     });
     let response = send(&request)?;
     let text = match &response {
@@ -68,6 +86,7 @@ fn open(
             opened_in: OpenedIn::Tab,
             workspace_id,
             placement: opened,
+            source: why,
         } => {
             let place = match opened {
                 Placement::Beside => "beside the terminal",
@@ -78,6 +97,7 @@ fn open(
             } else {
                 ""
             };
+            let shown = format!("{shown}{}", opened_as(*why));
             match workspace_id {
                 Some(id) => format!("Opened {shown} {place} of workspace {id}{fallback}"),
                 None => format!("Opened {shown} {place}{fallback}"),
@@ -185,7 +205,8 @@ pub(super) fn run(command: BrowserCommand, context: &Context) -> crate::Result<O
             workspace,
             focus,
             placement,
-        } => open(&target, workspace, focus, placement, context),
+            source,
+        } => open(&target, workspace, focus, placement, source, context),
         BrowserCommand::Reload => reload(),
         BrowserCommand::Feedback { wait } => feedback(wait, context),
         BrowserCommand::List => tabs::list(true, context),

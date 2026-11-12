@@ -16,8 +16,8 @@ pub(super) const EVENT_CAPACITY: usize = 64;
 
 /// What a page reported, from the tab `P` names. Handlers run on the
 /// platform's callbacks, so they only queue these for the window to apply on
-/// its next tick.
-#[derive(Debug)]
+/// its next tick. `Debug` shows the kind and the page only; see
+/// [`Event::origin`].
 pub(crate) enum Event<P = TabId> {
     Title(P, String),
     Loaded(P, String),
@@ -53,6 +53,8 @@ pub(crate) enum Event<P = TabId> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum Source {
     Tab(TabId),
+    /// The section reuses its tab ID, but each page has its own instance.
+    Walkr(u64),
     #[cfg(target_os = "macos")]
     Popup(u64),
 }
@@ -78,6 +80,19 @@ impl<P> Event<P> {
             #[cfg(servo_pages)]
             Self::Untitled(source) => ("untitled", source),
         }
+    }
+}
+
+// By hand, for every report: an address may hold the secret of a Walkr run,
+// and no code reads a report's `Debug` for what the page put in it.
+impl<P: std::fmt::Debug> std::fmt::Debug for Event<P> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let (kind, source) = self.origin();
+        // i18n: data
+        f.debug_struct("Event")
+            .field("kind", &kind)
+            .field("source", source)
+            .finish_non_exhaustive()
     }
 }
 

@@ -6,7 +6,7 @@
 use super::{
     Flash, SheprdWindow,
     chrome_focus::Region,
-    render::{Notice, NoticeCard},
+    notices::{Notice, NoticeCard},
 };
 use crate::{browser::Overlay, fonts::StyledFont, i18n::fl, notifications::safe_text};
 use gpui::{prelude::*, *};

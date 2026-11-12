@@ -40,20 +40,34 @@ impl SheprdWindow {
         self.save_chrome();
     }
 
+    pub(crate) fn chrome(&self) -> crate::preferences::Chrome {
+        crate::preferences::Chrome {
+            activity_last_opened: self.activity.last_opened().clone(),
+            activity_panel: self.activity.chosen(),
+            agent_sort: self.agent_sort_modified.then_some(self.agent_sort),
+            device_order: self.device_order.clone(),
+            kanban_lane_order: self.kanban_order.keys.clone(),
+            mod_panel_width: self.mod_panel_width.chosen(),
+            notes_width: self.notes_width.chosen(),
+            review_files_width: self.review_files_width.chosen(),
+            sidebar_split: self.sidebar_split,
+            sidebar_width: self.sidebar_width,
+        }
+    }
+
     /// One file holds the whole chrome, so every save carries all fields.
     pub(crate) fn save_chrome(&self) {
+        // Do not replace disk fields with startup defaults before their load arrives.
+        if !self.kanban_order.loaded {
+            return;
+        }
         if let Some(preferences) = &self.sidebar_preferences {
-            preferences.save(crate::preferences::Chrome {
-                activity_panel: self.activity.chosen(),
-                activity_last_opened: self.activity.last_opened().clone(),
-                sidebar_width: self.sidebar_width,
-                sidebar_split: self.sidebar_split,
-                agent_sort: self.agent_sort_modified.then_some(self.agent_sort),
-                notes_width: self.notes_width.chosen(),
-                mod_panel_width: self.mod_panel_width.chosen(),
-                review_files_width: self.review_files_width.chosen(),
-                device_order: self.device_order.clone(),
-            });
+            let revision = preferences.save(self.chrome());
+            if self.kanban_order.unsaved.get() {
+                self.kanban_order.pending.set(Some(revision));
+            }
+        } else if self.kanban_order.unsaved.get() {
+            self.kanban_order.failed.set(true);
         }
     }
 

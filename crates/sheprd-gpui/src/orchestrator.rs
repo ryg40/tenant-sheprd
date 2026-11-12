@@ -6,7 +6,7 @@
 
 mod host;
 mod section;
-mod view;
+pub(crate) mod view;
 
 pub(crate) use host::{LiveCache, Orchestrator, ViewId};
 pub(crate) use sheprd_orchestrator::*;

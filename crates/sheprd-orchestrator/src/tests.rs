@@ -19,6 +19,7 @@ mod beads_script;
 mod combined_changes;
 mod forgejo;
 mod forgejo_account;
+mod forgejo_kanban_history;
 mod forgejo_nodes;
 mod forgejo_remote;
 mod forgejo_search;

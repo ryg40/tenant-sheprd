@@ -95,7 +95,7 @@ fn the_daemon_sort_seeds_the_agents_panel_until_toggled(cx: &mut TestAppContext)
     assert_eq!(load(visual, "priority"), (AgentSort::Priority, false));
     // Stored chrome without a toggle leaves the daemon's choice alone.
     view.update(visual, |view, _| {
-        view.apply_stored_chrome(Chrome::default())
+        view.apply_stored_chrome(Ok(Chrome::default()))
     });
     assert_eq!(load(visual, "priority"), (AgentSort::Priority, false));
     assert_eq!(load(visual, "spaces"), (AgentSort::Grouped, false));
@@ -117,10 +117,10 @@ fn the_daemon_sort_seeds_the_agents_panel_until_toggled(cx: &mut TestAppContext)
     });
     cx.run_until_parked();
     view.update(cx, |view, _| {
-        view.apply_stored_chrome(Chrome {
+        view.apply_stored_chrome(Ok(Chrome {
             agent_sort: Some(AgentSort::Grouped),
             ..Chrome::default()
-        });
+        }));
         assert_eq!(view.agent_sort, AgentSort::Grouped);
         assert!(view.agent_sort_modified);
     });

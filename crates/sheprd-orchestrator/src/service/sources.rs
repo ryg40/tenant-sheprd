@@ -68,6 +68,8 @@ impl Worker {
             return Ok(SyncState::Unsupported);
         };
         let count = listing.items.len();
+        self.history
+            .reconcile(Some(store), &listing.items, Utc::now());
         if !listing.complete || !writable {
             self.uncached.insert(key.clone(), listing.items);
             return Ok(if listing.complete {

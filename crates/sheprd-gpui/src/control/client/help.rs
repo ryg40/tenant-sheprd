@@ -12,14 +12,21 @@ Exit status: 0 done, 1 refused, 2 invalid arguments, 3 Sheprd not running,
 
 const BROWSER: &str = "\
 sheprd browser open URL|FILE [--workspace ID] [--no-focus] [--beside|--tab]
-    Show a web address, or a local HTML file, in a browser tab of the running
-    Sheprd. The tab joins the caller's own workspace (HERDR_WORKSPACE_ID),
+                    [--source]
+    Show a web address, or a local HTML or Markdown file, in a browser tab
+    of the running Sheprd. The tab joins the caller's own workspace (HERDR_WORKSPACE_ID),
     or the frontmost one outside Herdr. Showing the same page again from the
     same pane reuses and reloads its tab. Bare hosts such as localhost:3000
     are accepted. A file is served with the other files in its folder.
     A file opened from a Herdr pane goes in a split next to that terminal,
     which stays in view and keeps the keyboard; a web address takes a tab of
     the group in use. --beside and --tab choose instead.
+    A Markdown file renders as a page that runs no script. The tab follows
+    the file as it changes on disk. --source shows a file's source, read-only,
+    in place of its page; the tab's switch, or the toggle_source command,
+    changes between the two. A build that cannot render pages shows the
+    source, and so does a Markdown or HTML file in a hidden folder; the
+    answer then says so.
 sheprd browser reload
     Reload the pages this pane opened, for example after editing the file.
 sheprd browser feedback [--wait SECONDS]
@@ -68,7 +75,7 @@ fn family(name: &str) -> &'static str {
             "sheprd window [list]\n    The app's windows, with IDs for --window.\nsheprd window alerts\n    The alerts the window kept, newest first, including those held back\n    by quiet hours or with delivery off.\nsheprd window new [--session NAME]\n    Open another window: of the caller's own Herdr session, of a named\n    local session, or outside Herdr of the frontmost window's host.\nsheprd window focus ID\nsheprd window fullscreen [on|off|toggle]\nsheprd window size [WIDTHxHEIGHT]\n    Print the window's size, or resize it. Windows cannot be moved.\nsheprd window detach|reconnect\n    Detach from, or reconnect to, the window's selected host."
         }
         "ui" => {
-            "sheprd ui sidebar [on|off|toggle]\nsheprd ui statusbar [on|off|toggle]\nsheprd ui font-size +|-|reset|POINTS\nsheprd ui panel workspaces|overview|pull-requests|issues|tasks|security|automations|ports|usage\nsheprd ui agent-group [NAME|all]\n    List the agents panel's coordinator groups, or show one group's sessions\n    with its coordinator first. Needs [sidebar] coordinator_suffix.\n    For this window and session; settings are changed with `config`."
+            "sheprd ui sidebar [on|off|toggle]\nsheprd ui statusbar [on|off|toggle]\nsheprd ui font-size +|-|reset|POINTS\nsheprd ui panel workspaces|overview|pull-requests|issues|kanban|tasks|security|automations|ports|usage|walkr\nsheprd ui agent-group [NAME|all]\n    List the agents panel's coordinator groups, or show one group's sessions\n    with its coordinator first. Needs [sidebar] coordinator_suffix.\n    For this window and session; settings are changed with `config`."
         }
         "tab" => {
             "sheprd tab [list]\n    The app's own tabs: pages, code, reviews, Devices.\n    Terminal tabs belong to Herdr: use `herdr tab`.\nsheprd tab focus|close ID\n    Show a tab, switching to its workspace, or close it."
@@ -80,7 +87,7 @@ fn family(name: &str) -> &'static str {
             "sheprd devices [open]\n    Open the Devices overview tab in the caller's workspace."
         }
         "orchestrator" => {
-            "sheprd orchestrator [open] [--repo PATH]\n    Show the Issues section narrowed to the caller's project, or PATH's.\nsheprd orchestrator items|issues|prs|tasks [--repo PATH | --forgejo HOST]\n    List what it last synced, from its local database (no network).\n    --forgejo HOST lists the open issues of every repository the Forgejo\n    token for HOST reads. Runs here; Sheprd need not run. Exits 4 before\n    its first sync."
+            "sheprd orchestrator [open] [--repo PATH]\n    Show the Issues section narrowed to the caller's project, or PATH's.\nsheprd orchestrator items|issues|prs|tasks [--repo PATH | --forgejo HOST]\n    List what it last synced, from its local database (no network).\n    --forgejo HOST lists the open issues of every repository the Forgejo\n    token for HOST reads. Runs here; Sheprd need not run. Exits 4 before\n    its first sync.\nsheprd orchestrator board [--cursor CURSOR] [--json] [--window ID]\n    Read the window's prepared read-only Kanban board, without focus or\n    provider I/O. Exit 4 means preparation is pending or a stale cursor\n    requires a restart. Pages contain at most 100 cards and 192 KiB.\n    Card moves are not available yet. Forgejo Done history includes up to\n    100 records per repository updated within 30 days; account reads cap\n    the whole account at 200. GitHub shows already loaded settled PRs;\n    its Done history reader arrives later.\nsheprd orchestrator board order LANE [--before LANE] [--json] [--window ID]\n    Move a known canonical lane before another, or to the end. Local\n    preferences save asynchronously; no tracker changes. Exit 5 means\n    an unknown lane; exit 6 means a busy drag or dialog."
         }
         "review" => {
             "sheprd review [open]\n    Open the review of the caller's workspace's uncommitted changes."
@@ -141,8 +148,14 @@ fn family(name: &str) -> &'static str {
         "mod" => {
             "sheprd mod [list]\n    The mods the window runs, where each draws, and any error. Mods are\n    folders in <config>/herdr/gpui-mods; saving a file reloads its mod.\n    Exits 4 when there are none.\nsheprd mod reload NAME\n    Read a mod's files again now.\nsheprd mod open NAME\n    Show a mod's activity bar app in the window's body. Exits 5 when no\n    running mod of that name has one, 8 while the activity bar is off.\nsheprd mod panel [show|hide|toggle]\n    The panel of mod sections on the window's right: whether it shows and\n    which mods have a section, or show, hide, or toggle it.\nsheprd mod logs NAME [--lines N]\n    The last lines it wrote with herdr.log (default 50, at most 200).\nsheprd mod check DIR\n    Load a mod folder, run its init and view once, and report what it\n    draws. Runs here; Sheprd need not run. Exits 1 with the error and\n    its line when the mod is invalid."
         }
+        "files" => {
+            "sheprd files [status]\n    The file explorer on the window's right: whether it shows, and the\n    folder it lists, which is the checkout of the window's focused pane\n    (its Git root, else its folder). Only a local checkout is listed.\nsheprd files show|hide|toggle\n    Show, hide, or toggle the explorer (also the `toggle_file_explorer`\n    command).\nsheprd files reveal PATH\n    Show the explorer with the file or folder PATH selected and the\n    folders holding it open. Exits 5 when PATH is not inside the folder\n    the explorer lists, 8 for a remote host. Opens nothing: use\n    `sheprd code open` or `sheprd browser open` to show a file."
+        }
         "search" => {
             "sheprd search symbol|file QUERY... [--limit N]\n    Go to Symbol or Go to File over the current directory's checkout,\n    printing paths relative to its root. Runs here; Sheprd need not run."
+        }
+        "walkr" => {
+            "sheprd walkr connect URL|- [--show]\n    Tell the Walkr section of this window the page address of a Walkr\n    server you started in this pane. The section shows the page while\n    the server answers. URL must be http on 127.0.0.1, localhost or\n    [::1] with a port, at most 2,048 bytes; anything else exits 2 and\n    changes nothing. The address holds a secret in its path: pass - to\n    send it as the first line of standard input, which other users of\n    the computer cannot read. Sheprd shows, logs and keeps host and port\n    only. --show also shows the section, as `ui panel walkr` does.\n    A run of another server is replaced and its page closes; the answer\n    says so. Runs in a Herdr pane only.\nsheprd walkr disconnect\n    This pane no longer holds the run. The run ends when no pane holds\n    it. The page stays open for a rating until the user selects Close\n    in the section or it is idle for 2 hours: no command closes it.\n    Exits 0 also when this pane held no run.\nsheprd walkr status\n    Whether Walkr can be reached from this computer, its host and port,\n    the age of the last probe, the source (a connected run or walkr.url),\n    whether the run is live, and the count of saved sessions.\n    Waits at most 7 seconds for a fresh probe or saved-session list.\n    A probe older than 30 seconds or a list older than 60 seconds\n    needs a refresh. No --wait option is needed.\n    Exits 0 for every determined state, including unreachable; 4 when\n    no run is connected and walkr.url is unset (source none), and 7\n    when the probe or saved-session list does not answer in time."
         }
         "config" => {
             "sheprd config [path]\n    The settings files.\nsheprd config get KEY\n    The setting's value, as TOML: your override, else the default.\nsheprd config set KEY VALUE\nsheprd config unset KEY\n    Change a setting in config-gpui.local.toml. VALUE is read as TOML\n    (14, true, [\"a\"], { show = true }), else as text. A value or key\n    Sheprd would not load is refused and the file left as it was.\n    A running Sheprd applies the change at once. KEY is dotted, such\n    as terminal.size. Unsetting a key that is not set exits 4.\nsheprd config check\n    Report settings that do not load and unknown keys, and, when Sheprd\n    runs, fonts that are not installed; exits 1 when there are any.\nsheprd config reload\n    Reread Herdr's config and this app's.\nOnly reload needs Sheprd running."

@@ -51,6 +51,8 @@ pub enum Command {
     ToggleStatusBar,
     /// Shows or hides the panel of mod sections on the window's right.
     ToggleModPanel,
+    /// Shows or hides the file explorer on the window's right.
+    ToggleFileExplorer,
     /// Moves keyboard focus to the next of the terminal, the title bar, the
     /// sidebar, and the status bar, where Tab moves between controls.
     FocusNextRegion,
@@ -97,6 +99,8 @@ pub enum Command {
     GitMenu,
     /// Annotate mode on the page in view.
     ToggleAnnotate,
+    /// A Markdown or HTML file in view, as its page or as its source.
+    ToggleSource,
     InstallBrowserSkill,
     SplitEditor,
     OpenCode,
@@ -587,6 +591,11 @@ pub const COMMANDS: &[CommandInfo] = &[
         message: "commands-toggle-mod-panel",
     },
     CommandInfo {
+        command: Command::ToggleFileExplorer,
+        name: "toggle_file_explorer",
+        message: "commands-toggle-file-explorer",
+    },
+    CommandInfo {
         command: Command::FocusNextRegion,
         name: "focus_next_region",
         message: "commands-focus-next-region",
@@ -735,6 +744,11 @@ pub const COMMANDS: &[CommandInfo] = &[
         command: Command::ToggleAnnotate,
         name: "toggle_annotate",
         message: "commands-toggle-annotate",
+    },
+    CommandInfo {
+        command: Command::ToggleSource,
+        name: "toggle_source",
+        message: "commands-toggle-source",
     },
     CommandInfo {
         command: Command::InstallBrowserSkill,

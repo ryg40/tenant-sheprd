@@ -11,11 +11,13 @@ pub enum ActivityPanel {
     Overview,
     PullRequests,
     Issues,
+    Kanban,
     Tasks,
     Security,
     Automations,
     Ports,
     Usage,
+    Walkr,
 }
 
 impl ActivityPanel {
@@ -24,11 +26,13 @@ impl ActivityPanel {
         Self::Overview,
         Self::PullRequests,
         Self::Issues,
+        Self::Kanban,
         Self::Tasks,
         Self::Security,
         Self::Automations,
         Self::Ports,
         Self::Usage,
+        Self::Walkr,
     ];
 
     /// The name the CLI and the preferences file use.
@@ -38,11 +42,13 @@ impl ActivityPanel {
             Self::Workspaces => "workspaces",
             Self::PullRequests => "pull-requests",
             Self::Issues => "issues",
+            Self::Kanban => "kanban",
             Self::Tasks => "tasks",
             Self::Security => "security",
             Self::Automations => "automations",
             Self::Ports => "ports",
             Self::Usage => "usage",
+            Self::Walkr => "walkr",
         }
     }
 

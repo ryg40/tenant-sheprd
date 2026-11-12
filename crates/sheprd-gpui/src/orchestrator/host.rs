@@ -119,7 +119,7 @@ impl SheprdWindow {
     }
 
     /// The sections' view, made if the window has none yet.
-    pub(super) fn sections_view(&mut self, cx: &mut Context<Self>) -> ViewId {
+    pub(crate) fn sections_view(&mut self, cx: &mut Context<Self>) -> ViewId {
         if let Some(id) = self
             .activity
             .section_view
@@ -227,7 +227,7 @@ impl SheprdWindow {
         ))
     }
 
-    pub(super) fn orchestrator_view(&self, id: ViewId) -> Option<&Entity<OrchestratorView>> {
+    pub(crate) fn orchestrator_view(&self, id: ViewId) -> Option<&Entity<OrchestratorView>> {
         self.orchestrators
             .get(&id)
             .map(|orchestrator| &orchestrator.view)
@@ -381,6 +381,7 @@ impl SheprdWindow {
         let (live, branches) = self.live_agents();
         let look = self.look();
         let specs = self.repo_specs();
+        let authoritative = self.kanban_roster_authoritative(specs.len());
         // Only the shown Pull requests or Issues section is on screen; the
         // bar's counts alone do not need a sync a minute.
         let shown_view = self
@@ -399,16 +400,55 @@ impl SheprdWindow {
                 })
                 .collect();
             view.update(cx, |view, cx| {
+                view.set_lane_order(&self.kanban_order.keys, authoritative, cx);
+                view.lane_order_failed(self.kanban_order.failed.get(), cx);
                 view.set_repos(specs.clone(), cx);
                 view.set_visible(shown_view == Some(id));
                 view.poll(cx);
                 view.set_look(look.clone(), cx);
                 view.set_roles(&self.config.agent_roles);
+                view.set_kanban_mapping(&self.config.kanban, cx);
                 view.set_live(live.clone(), branches.clone(), cx);
                 for (target, token, login) in accounts {
                     view.set_github(&target, token, login, cx);
                 }
             });
+            self.collect_lane_order(&view, cx);
+        }
+    }
+
+    /// Discovery, connection loss and checkout caps cannot prove removal.
+    pub(crate) fn kanban_roster_authoritative(&self, repositories: usize) -> bool {
+        self.kanban_order.loaded
+            && self.catalog.authoritative()
+            && repositories < MAX_REPOS
+            && self
+                .endpoints
+                .iter()
+                .enumerate()
+                .filter(|(_, endpoint)| {
+                    endpoint.enabled && scripts_run_on(&endpoint.connection.target)
+                })
+                .all(|(index, endpoint)| {
+                    let live = if index == self.selected_endpoint {
+                        &self.live
+                    } else {
+                        &endpoint.live
+                    };
+                    live.status.is_connected() && live.snapshot.is_some()
+                })
+    }
+
+    pub(crate) fn collect_lane_order(
+        &mut self,
+        view: &Entity<OrchestratorView>,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some((keys, chosen)) = view.update(cx, |view, _| view.take_lane_order()) {
+            self.kanban_order.keys = keys;
+            self.kanban_order.modified |= chosen;
+            self.kanban_order.unsaved.set(true);
+            self.save_chrome();
         }
     }
 

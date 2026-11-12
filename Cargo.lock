@@ -13004,6 +13004,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sheprd-client",
+ "sheprd-control-protocol",
  "sheprd-credentials",
  "sheprd-github",
  "sheprd-remote",

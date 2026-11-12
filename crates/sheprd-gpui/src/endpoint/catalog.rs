@@ -13,18 +13,20 @@ use std::{
 };
 
 pub(crate) struct Catalog {
-    development: Option<bool>,
-    pending: Option<mpsc::Receiver<Result<CatalogUpdate>>>,
-    next_poll: Instant,
     /// The endpoint ID to restore, or `None` for Local.
     pub(super) desired: Option<String>,
+    development: Option<bool>,
+    /// Only a successful full catalog read proves that absent hosts are removed.
+    discovered: bool,
     pub(super) initialized: bool,
-    pub(super) restore_pending: bool,
-    pub(super) queued_write: Option<Option<String>>,
-    writing: Option<mpsc::Receiver<Result<()>>>,
     /// The storage failure last warned about. Loads retry every two seconds,
     /// so each distinct failure warns once until a load succeeds.
     last_failure: Option<StorageFailure>,
+    next_poll: Instant,
+    pending: Option<mpsc::Receiver<Result<CatalogUpdate>>>,
+    pub(super) queued_write: Option<Option<String>>,
+    pub(super) restore_pending: bool,
+    writing: Option<mpsc::Receiver<Result<()>>>,
 }
 
 pub(super) struct CatalogUpdate {
@@ -111,19 +113,20 @@ fn store(development: bool, selected: Option<&str>) -> Result<()> {
 impl Catalog {
     pub fn new(target: &ConnectTarget) -> Self {
         Self {
+            desired: None,
             development: match target {
                 ConnectTarget::Socket(_) => None,
                 ConnectTarget::Session { development, .. } => Some(*development),
                 _ => Some(false),
             },
-            pending: None,
-            next_poll: Instant::now(),
-            desired: None,
+            discovered: false,
             initialized: false,
-            restore_pending: false,
-            queued_write: None,
-            writing: None,
             last_failure: None,
+            next_poll: Instant::now(),
+            pending: None,
+            queued_write: None,
+            restore_pending: false,
+            writing: None,
         }
     }
 
@@ -132,6 +135,9 @@ impl Catalog {
         if let Some(result) = self.pending.as_ref().and_then(|rx| rx.try_recv().ok()) {
             self.pending = None;
             self.next_poll = Instant::now() + Duration::from_secs(2);
+            if result.is_err() {
+                self.discovered = false;
+            }
             if let Some(failure) = self.new_failure(&result) {
                 failure.warn("Host catalog"); // i18n: data
             }
@@ -148,6 +154,7 @@ impl Catalog {
                 })
             {
                 self.pending = None;
+                self.discovered = false;
                 self.next_poll = Instant::now() + Duration::from_secs(2);
                 return Some(Err(error.into()));
             }
@@ -174,7 +181,18 @@ impl Catalog {
         self.initialized
     }
 
+    pub(crate) fn authoritative(&self) -> bool {
+        // Explicit sockets never load the full catalog, even when they share a
+        // normal window's preferences. They cannot prove that saved hosts left.
+        self.discovered && self.pending.is_none()
+    }
+
     pub(super) fn accept(&mut self, update: &CatalogUpdate) {
+        self.discovered = true;
+        #[cfg(feature = "cloud")]
+        {
+            self.discovered = update.cloud.is_some();
+        }
         if !self.initialized {
             self.desired = update.selection.clone().flatten();
             self.restore_pending = self.desired.is_some();

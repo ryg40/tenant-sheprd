@@ -4,7 +4,7 @@
 // i18n: migrated
 use super::{
     SheprdWindow,
-    render::{Notice, NoticeCard},
+    notices::{Notice, NoticeCard},
 };
 use crate::{
     browser::Overlay,

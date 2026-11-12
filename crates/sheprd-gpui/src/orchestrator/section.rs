@@ -18,8 +18,12 @@ impl SheprdWindow {
             return;
         };
         let id = self.sections_view(cx);
-        let changed =
-            Some(id) != self.activity.section_view || self.activity.section_list != Some(list);
+        let kanban = self.activity_section() == Some(ActivityPanel::Kanban);
+        let changed = Some(id) != self.activity.section_view
+            || self.activity.section_list != Some(list)
+            || self
+                .orchestrator_view(id)
+                .is_some_and(|view| view.read(cx).kanban_shown() != kanban);
         self.activity.section_view = Some(id);
         let project = self.activity.section_project.take();
         if !changed && project.is_none() {
@@ -33,6 +37,7 @@ impl SheprdWindow {
             view.set_repos(specs, cx);
             if changed {
                 view.show_list(list, cx);
+                view.show_kanban(kanban, cx);
             }
             if let Some(key) = project {
                 view.only_project(key, cx);
@@ -191,7 +196,7 @@ impl SheprdWindow {
 /// The list a section shows, for the sections that show one.
 pub(crate) fn list_of(section: ActivityPanel) -> Option<List> {
     match section {
-        ActivityPanel::Issues => Some(List::Issues),
+        ActivityPanel::Issues | ActivityPanel::Kanban => Some(List::Issues),
         ActivityPanel::Tasks => Some(List::Tasks),
         ActivityPanel::PullRequests => Some(List::PullRequests),
         ActivityPanel::Overview
@@ -199,6 +204,7 @@ pub(crate) fn list_of(section: ActivityPanel) -> Option<List> {
         | ActivityPanel::Automations
         | ActivityPanel::Ports
         | ActivityPanel::Workspaces
-        | ActivityPanel::Usage => None,
+        | ActivityPanel::Usage
+        | ActivityPanel::Walkr => None,
     }
 }

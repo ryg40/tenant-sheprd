@@ -58,7 +58,7 @@ The in-app reference lists every command, its default on your platform, and your
 
 These are native actions, not keys sent to the terminal. Clipboard shortcuts (Copy and Paste) are fixed Edit actions; see [Terminals](terminals.md#selection-and-copy).
 
-Some commands have no default key, such as **Review Changes** (`review_changes`), **Git Menu** (`git_menu`), **Toggle Annotate** (`toggle_annotate`), **Move Pane…** (`move_pane`), **Worktree Notes** (`worktree_notes`), **Open VS Code** (`open_code`) and **Open px0** (`open_px0`). Bind them as shown below.
+Some commands have no default key, such as **Review Changes** (`review_changes`), **Git Menu** (`git_menu`), **Toggle Annotate** (`toggle_annotate`), **Toggle Source or Rendered Page** (`toggle_source`), **Move Pane…** (`move_pane`), **Worktree Notes** (`worktree_notes`), **Open VS Code** (`open_code`) and **Open px0** (`open_px0`). Bind them as shown below.
 
 ## The command palette
 

@@ -3,24 +3,29 @@ use super::super::{
     Opening, Placed, Placement, Target, main_windows, plain, plain_path,
     protocol::{
         BrowserOpen, Caller, ErrorCode, FeedbackRequest, MAX_WAIT_SECONDS, NotesRequest, NotesTo,
-        OpenedIn, Page, Response,
+        OpenedIn, Page, Response, SourceWhy,
     },
     socket, valid_caller,
 };
-use crate::browser::{Feedback, FeedbackKey, LocalFile, Location, Scope, WebUrl};
+use crate::browser::{Feedback, FeedbackKey, Location, Scope, WebUrl, browser_view};
 use gpui::App;
 use std::path::Path;
 
-fn location(page: &Page) -> Result<Location, Response> {
-    match page {
+/// Where the tab goes, and for a local file that shows as its source, why.
+fn location(request: &BrowserOpen) -> Result<(Location, Option<SourceWhy>), Response> {
+    match &request.page {
         Page::Url(url) => WebUrl::try_from(url.as_str())
-            .map(|url| Location::Web { url })
+            .map(|url| (Location::Web { url }, None))
             .map_err(|error| Response::error(ErrorCode::InvalidUrl, error.to_string())),
         Page::File(path) => {
             let home = crate::config::home().ok();
-            LocalFile::new(Path::new(path), home.as_deref())
-                .map(|file| Location::Local { file })
-                .map_err(|error| Response::error(ErrorCode::InvalidUrl, error.to_string()))
+            browser_view(
+                Path::new(path),
+                home.as_deref(),
+                crate::browser::EMBEDDED,
+                request.source,
+            )
+            .map_err(|error| Response::error(ErrorCode::InvalidUrl, error.to_string()))
         }
     }
 }
@@ -32,22 +37,21 @@ pub(super) fn open_browser(request: &BrowserOpen, cx: &mut App) -> Response {
             "Invalid workspace, pane, or daemon",
         );
     }
-    let location = match location(&request.page) {
+    let (location, why) = match location(request) {
         Ok(location) => location,
         Err(response) => return response,
     };
-    if !crate::browser::EMBEDDED {
-        let Location::Web { url } = &location else {
-            return Response::error(
-                ErrorCode::Unsupported,
-                "Local pages need browser tabs, which this platform's build does not have",
-            );
-        };
+    // A build without pages sends a web address to the system browser. A
+    // local file still gets its tab, which shows the file's source.
+    if !crate::browser::EMBEDDED
+        && let Location::Web { url } = &location
+    {
         cx.open_url(url.as_str());
         return Response::Opened {
             opened_in: OpenedIn::SystemBrowser,
             workspace_id: None,
             placement: Placement::Tab,
+            source: None,
         };
     }
     let mut windows = main_windows(cx);
@@ -74,6 +78,7 @@ pub(super) fn open_browser(request: &BrowserOpen, cx: &mut App) -> Response {
                 location: &location,
                 focus: request.focus,
                 placement: request.placement,
+                source: why.is_some(),
             };
             let placed = handle.update(cx, |view, window, cx| {
                 view.open_requested_browser_tab(&target, strict, &opening, window, cx)
@@ -87,6 +92,7 @@ pub(super) fn open_browser(request: &BrowserOpen, cx: &mut App) -> Response {
                         opened_in: OpenedIn::Tab,
                         workspace_id: Some(workspace_id),
                         placement,
+                        source: why,
                     };
                 }
                 Ok(Some(Placed::Full)) => {

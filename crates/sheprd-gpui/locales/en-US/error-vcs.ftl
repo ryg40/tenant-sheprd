@@ -20,6 +20,14 @@ error-vcs-checkpoint-worker = The checkpoint worker stopped.
 error-vcs-code-index-cancelled = Reading the checkout was cancelled
 error-vcs-code-index-root = Only a local Git checkout can be searched for files and symbols
 
+## The file explorer's folders.
+
+error-vcs-file-tree-cancelled = Listing the folder was cancelled
+error-vcs-file-tree-not-file = This is not a file of the checkout
+error-vcs-file-tree-not-folder = This is not a folder of the checkout
+error-vcs-file-tree-outside = The path is outside the checkout
+error-vcs-file-tree-unreadable = The folder could not be read
+
 ## Git commands. "git commit" and "git push" name Git's own commands.
 
 error-vcs-git-busy = A Git operation is already running.

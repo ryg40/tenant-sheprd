@@ -3,8 +3,11 @@
 //! a pane, the text there is verified: a well-formed address at once, a
 //! file path when a check off the UI thread finds it on disk, and a web
 //! address through the daemon, which is asked which cells the link covers
-//! so that one wrapping onto the next row is opened whole. Only the link
-//! modifier underlines what is verified.
+//! so that one wrapping onto the next row is opened whole. A web address
+//! that the program in the pane broke over rows itself, as an agent does,
+//! carries no wrap flag for the daemon to read, so the row-local reading of
+//! it is the one underlined and opened. Only the link modifier underlines
+//! what is verified.
 //!
 //! Only a click with the link modifier or Shift held opens a link; a drag
 //! with either selects. Shift opens only a verified link. A click goes to
@@ -100,6 +103,10 @@ struct PendingActivation {
 /// What this client opens itself for a click no plugin handler claimed.
 enum Fallback {
     Web(WebUrl),
+    /// A web address read across rows that the program in the pane broke
+    /// itself. The daemon reads one row of it at most, so this reading
+    /// opens even where the daemon has one of its own.
+    WebAcrossRows(WebUrl),
     /// An address with another scheme: opened at once when the scheme is
     /// trusted, and after the user confirms it otherwise.
     External(ExternalUrl),
@@ -112,6 +119,13 @@ enum Fallback {
         link: FileLink,
         in_editor: bool,
     },
+}
+
+/// Whether a row-local link is a web address read across rows, which only a
+/// break the program made itself yields: an address the terminal wrapped is
+/// never read locally.
+fn across_rows(link: &RowLink) -> bool {
+    matches!(link.target, RowTarget::Web(_)) && !link.continued.is_empty()
 }
 
 /// A press that may become a click on a link.
@@ -222,7 +236,9 @@ impl SheprdWindow {
     /// Like the highlight, the underline paints with the frame that owns its
     /// cells, and only while that frame shows the content the daemon
     /// resolved it from. Without one, the local reading under the pointer is
-    /// underlined instead, on every row it covers.
+    /// underlined instead, on every row it covers. A web address read
+    /// across rows the program broke comes first: the daemon resolves one
+    /// row of it at most, and the click opens all of them.
     pub(crate) fn underlined_link_rows(
         &self,
         surface: Option<&PaneSurfaceFrame>,
@@ -233,6 +249,9 @@ impl SheprdWindow {
             .is_some_and(|(_, modifiers)| crate::keymap::secondary(&modifiers));
         if !held {
             return Vec::new();
+        }
+        if let Some(link) = self.hovered_local_link().filter(|link| across_rows(link)) {
+            return link.rows().collect();
         }
         surface
             .zip(self.hovered_daemon_link())
@@ -538,6 +557,14 @@ impl SheprdWindow {
         if !pressed.same_link(&release) {
             return false;
         }
+        let web = if self
+            .local_link_at(release.position)
+            .is_some_and(|link| across_rows(&link.link))
+        {
+            Fallback::WebAcrossRows
+        } else {
+            Fallback::Web
+        };
         let fallback = match (release.file, release.other) {
             (Some(link), _) => Some(Fallback::File {
                 link,
@@ -555,7 +582,7 @@ impl SheprdWindow {
                 .url
                 .as_deref()
                 .and_then(|url| WebUrl::try_from(url).ok())
-                .map(Fallback::Web),
+                .map(web),
         };
         if let Some(cell) = &release.cell {
             // One click at a time: a second while the first is unanswered
@@ -594,7 +621,14 @@ impl SheprdWindow {
                 cx.notify();
             }
             Activation::Declined(url) => {
-                self.open_link(url.map(Fallback::Web).or(fallback), in_tab, window, cx);
+                // The daemon reads the terminal's wraps and this client the
+                // breaks a program made, which the daemon sees as rows that
+                // end, so there the local reading is the whole address.
+                let link = match fallback {
+                    whole @ Some(Fallback::WebAcrossRows(_)) => whole,
+                    fallback => url.map(Fallback::Web).or(fallback),
+                };
+                self.open_link(link, in_tab, window, cx);
             }
         }
     }
@@ -607,7 +641,9 @@ impl SheprdWindow {
         cx: &mut Context<Self>,
     ) {
         match link {
-            Some(Fallback::Web(url)) => self.open_web_link(url, in_tab, window, cx),
+            Some(Fallback::Web(url) | Fallback::WebAcrossRows(url)) => {
+                self.open_web_link(url, in_tab, window, cx)
+            }
             Some(Fallback::File { link, in_editor }) => self.open_file_link(link, in_editor, cx),
             Some(Fallback::External(url)) if url.trusted() => cx.open_url(url.as_str()),
             Some(Fallback::External(url)) => self.ask_to_open_link(url, window, cx),

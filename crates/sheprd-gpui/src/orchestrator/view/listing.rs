@@ -161,6 +161,9 @@ impl OrchestratorView {
     /// came from, so a page and its actions go to the checkout the row is,
     /// else the first holding it.
     pub(super) fn repo_of(&self, key: &str) -> Option<usize> {
+        if self.kanban.shown {
+            return self.kanban_repo_of(key);
+        }
         self.lines
             .iter()
             .find_map(|line| match line {
@@ -186,6 +189,11 @@ impl OrchestratorView {
     }
 
     pub(super) fn refresh_rows(&mut self) {
+        self.revision += 1;
+        self.kanban.invalidate();
+        if self.kanban.shown {
+            return;
+        }
         // A folder outside Git has no pill (`projects_named`), so a pick of
         // it, as opening its workspace's issues makes, could not be undone.
         let repos = &self.repos;
@@ -346,7 +354,6 @@ impl OrchestratorView {
         }
         self.mixed_sources = providers.len() > 1;
         self.lines = lines;
-        self.revision += 1;
         if self.selected.is_none() || !self.selection_listed() {
             self.selected = self.keys().into_iter().next();
         }
@@ -354,6 +361,9 @@ impl OrchestratorView {
 
     /// The selectable keys of the shown list, in order.
     pub(super) fn keys(&self) -> Vec<String> {
+        if self.kanban.shown {
+            return self.kanban.keys();
+        }
         self.lines
             .iter()
             .filter_map(|line| match line {
@@ -372,6 +382,9 @@ impl OrchestratorView {
     /// The item `key` names, or the stand-in of one a run works on that is
     /// no longer listed.
     pub(super) fn item(&self, key: &str) -> Option<&Item> {
+        if self.kanban.shown {
+            return self.kanban_item(key);
+        }
         // The copy of the checkout the row shows: another checkout may have
         // read the item differently.
         self.repo_of(key)

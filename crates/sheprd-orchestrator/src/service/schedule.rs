@@ -21,6 +21,20 @@ pub(super) const HIDDEN_SYNC: Duration = Duration::from_secs(600);
 /// either.
 pub(super) const CHECKS_EVERY: Duration = Duration::from_secs(300);
 
+/// Additional settled history is independent of the active listing's period.
+pub(super) const HISTORY_EVERY: Duration = Duration::from_secs(300);
+
+pub(super) fn history_due(
+    attempted: Option<Instant>,
+    retry_until: Option<Instant>,
+    visible: bool,
+    now: Instant,
+) -> bool {
+    retry_until.is_none_or(|until| now >= until)
+        && attempted
+            .is_none_or(|at| now.saturating_duration_since(at) >= period(HISTORY_EVERY, visible))
+}
+
 /// The longest repeated failures wait, unless the provider asked for longer.
 const MAX_BACKOFF: Duration = Duration::from_secs(1800);
 

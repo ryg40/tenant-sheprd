@@ -396,6 +396,9 @@ impl WebViewDelegate for Delegate {
     /// it, and never read.
     fn show_console_message(&self, _: WebView, level: servo::ConsoleLogLevel, message: String) {
         use servo::ConsoleLogLevel::{Error, Warn};
+        if !self.0.open.log_console {
+            return;
+        }
         self.0.log(matches!(level, Error), |skipped| {
             let (text, cut) = console::bounded(&message);
             let text = console::without_queries(text);

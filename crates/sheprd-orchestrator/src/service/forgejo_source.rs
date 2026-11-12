@@ -6,7 +6,25 @@ use crate::{
     Checkpoint,
     forge::{Listing, Scheme},
 };
-use std::sync::atomic::Ordering;
+use std::{
+    sync::atomic::{AtomicBool, Ordering},
+    time::Duration,
+};
+
+pub(super) fn history(
+    repository: (&SourceKey, Scheme),
+    cancelled: &AtomicBool,
+    cooldown: &mut Option<Duration>,
+) -> Result<crate::kanban::history::Read> {
+    let token = forgejo::environment_token(&repository.0.host, sheprd_client::login_env::var);
+    forgejo::history::repository(
+        repository,
+        token.as_ref(),
+        forgejo::history::cutoff(chrono::Utc::now()),
+        &|| cancelled.load(Ordering::Relaxed),
+        cooldown,
+    )
+}
 
 impl Worker {
     /// Lists Forgejo source `key`, continuing from `previous`.

@@ -2,7 +2,8 @@
 //! treat notes: safe HTML renders, but the page runs no script of its own. A
 //! local page can read every file in its folder, so the rendered HTML is
 //! sanitized, and a CSP blocks script in case the sanitizer misses anything.
-use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd, html};
+use crate::review::highlight;
+use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd, html};
 use std::{
     borrow::Cow,
     collections::{HashMap, HashSet},
@@ -13,6 +14,15 @@ const STYLE: &str = include_str!("markdown.css");
 // i18n: data
 const CSP: &str = "default-src 'none'; style-src 'unsafe-inline'; \
     img-src herdr-preview: http://herdr-preview.localhost https://herdr-preview.localhost https:";
+/// What one page colors at most; the rest of its code stays plain text. A
+/// page is made while its request waits, and coloring is the slow part:
+/// about 3 ms per KiB of dense code in a release build, so these bounds
+/// keep a page near 150 ms whatever a file holds.
+const MAX_COLOURED_BYTES: usize = 48 * 1024;
+const MAX_COLOURED_LINES: usize = 1_000;
+/// Lines one fenced block colors at most, so one long listing does not
+/// leave every later block plain.
+const MAX_BLOCK_COLOURED_LINES: usize = 400;
 /// Schemes a link or image may use; relative URLs are always kept.
 const URL_SCHEMES: [&str; 3] = ["http", "https", "mailto"];
 /// Put before every id, as GitHub does, so a note cannot shadow a page global
@@ -33,23 +43,19 @@ const STYLE_PROPERTIES: [&str; 9] = [
     "vertical-align",
 ];
 
-/// Whether `path` names a markdown file by its extension.
-pub(super) fn is_markdown(path: &Path) -> bool {
-    path.extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| {
-            extension.eq_ignore_ascii_case("md") || extension.eq_ignore_ascii_case("markdown")
-        })
-}
+pub(super) use super::file_view::is_markdown;
 
-/// A markdown file as a complete, self-contained HTML page.
-pub(super) fn page(source: &str, file_name: &str) -> String {
+/// A markdown file as a complete, self-contained HTML page. `theme` is the
+/// app's own stylesheet of the window's colors (`kit::theme_css`), written
+/// into the page; the page's own colors stand in where it is empty.
+pub(super) fn page(source: &str, file_name: &str, theme: &str) -> String {
     let options = Options::ENABLE_TABLES
         | Options::ENABLE_TASKLISTS
         | Options::ENABLE_STRIKETHROUGH
         | Options::ENABLE_FOOTNOTES;
     let mut events: Vec<Event<'_>> = Parser::new_ext(source, options).collect();
     let heading = add_heading_ids(&mut events);
+    let events = colour_code_blocks(events);
     let mut rendered = String::with_capacity(source.len() + source.len() / 2);
     html::push_html(&mut rendered, events.into_iter());
     let body = sanitizer().clean(&rendered).to_string();
@@ -63,7 +69,7 @@ pub(super) fn page(source: &str, file_name: &str) -> String {
         "<!doctype html>\n<html><head><meta charset=\"utf-8\">\
          <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\
          <meta http-equiv=\"Content-Security-Policy\" content=\"{CSP}\">\
-         <title>{title}</title><style>{STYLE}</style></head>\
+         <title>{title}</title><style>{theme}{STYLE}</style></head>\
          <body><main class=\"markdown\">\n{body}</main></body></html>\n",
         title = escape(title),
     )
@@ -86,6 +92,103 @@ fn sanitizer() -> ammonia::Builder<'static> {
             _ => Some(Cow::Borrowed(value)),
         });
     builder
+}
+
+/// Replaces each fenced block that names a language with its code already
+/// colored: one `span` per token, classed by what the token is. The code is
+/// escaped here and the result still passes the sanitizer, so a block's
+/// text can add no markup.
+fn colour_code_blocks(events: Vec<Event<'_>>) -> Vec<Event<'_>> {
+    let mut coloured = Vec::with_capacity(events.len());
+    let mut budget = Budget {
+        bytes: MAX_COLOURED_BYTES,
+        lines: MAX_COLOURED_LINES,
+    };
+    let mut events = events.into_iter();
+    while let Some(event) = events.next() {
+        let language = match &event {
+            Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(info))) => info
+                .split([' ', ',', '\t', '{'])
+                .next()
+                .filter(|language| !language.is_empty())
+                .map(str::to_ascii_lowercase),
+            _ => None,
+        };
+        let Some(language) = language else {
+            coloured.push(event);
+            continue;
+        };
+        let mut code = String::new();
+        for inner in events.by_ref() {
+            match inner {
+                Event::End(TagEnd::CodeBlock) => break,
+                Event::Text(text) => code.push_str(&text),
+                _ => {}
+            }
+        }
+        let spans = match budget.take(&code) {
+            0 => Vec::new(),
+            lines => highlight::colour_snippet(&language, &code, lines),
+        };
+        coloured.push(Event::Html(code_block(&language, &code, &spans).into()));
+    }
+    coloured
+}
+
+/// What is left of a page's coloring.
+struct Budget {
+    bytes: usize,
+    lines: usize,
+}
+
+impl Budget {
+    /// How many of `code`'s first lines may be colored, taken from what is
+    /// left. The lines after them stay plain.
+    fn take(&mut self, code: &str) -> usize {
+        let mut lines = 0;
+        for line in code
+            .split_inclusive('\n')
+            .take(MAX_BLOCK_COLOURED_LINES.min(self.lines))
+        {
+            if line.len() > self.bytes {
+                break;
+            }
+            self.bytes -= line.len();
+            lines += 1;
+        }
+        self.lines -= lines;
+        lines
+    }
+}
+
+/// A fenced block as HTML, each line's `spans` wrapped by their class.
+fn code_block(language: &str, code: &str, spans: &[Vec<highlight::Span>]) -> String {
+    let mut block = String::with_capacity(code.len() * 2);
+    // i18n: data
+    block.push_str("<pre><code class=\"language-");
+    block.push_str(&escape(language));
+    block.push_str("\">");
+    for (index, line) in code.split_inclusive('\n').enumerate() {
+        let mut at = 0;
+        for span in spans.get(index).map(Vec::as_slice).unwrap_or_default() {
+            let (Some(before), Some(token)) =
+                (line.get(at..span.start), line.get(span.start..span.end))
+            else {
+                break;
+            };
+            block.push_str(&escape(before));
+            // i18n: data
+            block.push_str("<span class=\"tok-");
+            block.push_str(span.token.css_name());
+            block.push_str("\">");
+            block.push_str(&escape(token));
+            block.push_str("</span>");
+            at = span.end;
+        }
+        block.push_str(&escape(line.get(at..).unwrap_or_default()));
+    }
+    block.push_str("</code></pre>\n");
+    block
 }
 
 /// Gives each heading a GitHub-style id made from its text, numbered when

@@ -188,6 +188,8 @@ pub(super) struct Open {
     /// Whether the page gets the bridge: only a local page does.
     pub(super) bridge: bool,
     pub(super) light: Option<bool>,
+    /// Whether page-controlled console text may reach the app log.
+    pub(super) log_console: bool,
     pub(super) source: Source,
     pub(super) reports: SyncSender<Event<Source>>,
     pub(super) mailbox: Arc<Mailbox>,

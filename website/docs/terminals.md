@@ -90,6 +90,8 @@ For an existing selection, run **Annotate Selection for the Agent** (Cmd-Shift-A
 
 Cmd-click (Ctrl-click on Linux and Windows) a link in a pane to open it. Shift-click opens a link too, also in a program that reads the mouse, and Shift-drag still selects. Shift checks the text under the pointer as Cmd and Ctrl do, without the underline, so it opens a web address that wraps onto the next row, and a printed file path once Sheprd finds the file. A click without either modifier only selects or goes to the program.
 
+A long web address that an agent such as Claude Code breaks over several rows, with the rest indented on the next row, opens whole from a click on any of its rows.
+
 - **A dashed underline** marks text that may be a link but is not verified yet.
 - **A solid underline** marks a verified link.
 - **A hand cursor** marks text a click acts on.

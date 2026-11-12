@@ -4,7 +4,7 @@
 
 use super::Localize;
 use crate::i18n::fl;
-use sheprd_vcs::{Error, checkpoint, code_index, git};
+use sheprd_vcs::{Error, checkpoint, code_index, file_tree, git};
 
 impl Localize for Error {
     fn localize(&self) -> String {
@@ -14,6 +14,7 @@ impl Localize for Error {
             #[cfg(feature = "azure")]
             Self::CloudHostUnsupported => fl!("error-vcs-cloud-host-unsupported"),
             Self::CodeIndex(error) => error.localize(),
+            Self::FileTree(error) => error.localize(),
             Self::Git(error) => error.localize(),
             Self::GitHub(error) => error.localize(),
             // keep-sorted end
@@ -44,6 +45,20 @@ impl Localize for code_index::Error {
         match self {
             Self::Cancelled => fl!("error-vcs-code-index-cancelled"),
             Self::Root => fl!("error-vcs-code-index-root"),
+        }
+    }
+}
+
+impl Localize for file_tree::Error {
+    fn localize(&self) -> String {
+        match self {
+            // keep-sorted start
+            Self::Cancelled => fl!("error-vcs-file-tree-cancelled"),
+            Self::NotFile => fl!("error-vcs-file-tree-not-file"),
+            Self::NotFolder => fl!("error-vcs-file-tree-not-folder"),
+            Self::Outside => fl!("error-vcs-file-tree-outside"),
+            Self::Unreadable(_) => fl!("error-vcs-file-tree-unreadable"),
+            // keep-sorted end
         }
     }
 }

@@ -91,6 +91,10 @@ pub enum CliError {
         command: &'static str,
         argument: OsString,
     },
+    /// As `Unexpected` or `UnknownCommand`, for a command whose arguments
+    /// may hold a secret: it names none of them.
+    #[error("{0}: unexpected argument; it is not shown, as it may hold a secret")]
+    UnexpectedUnnamed(&'static str),
     #[error("Unknown {family} command: {}", command.to_string_lossy())]
     UnknownCommand {
         family: &'static str,
@@ -120,6 +124,13 @@ pub enum CliError {
     #[cfg(all(feature = "integration-test", not(any(target_os = "macos", windows))))]
     #[error("--performance-test currently requires macOS or Windows native event delivery")]
     UnsupportedPerformancePlatform,
+}
+
+impl CliError {
+    /// The error as a command asked for `--json` prints it.
+    pub fn json(&self) -> serde_json::Value {
+        serde_json::json!({ "error": { "code": "usage", "message": self.to_string() } })
+    }
 }
 
 // The framed record is also read without execution by cross-platform packaging.

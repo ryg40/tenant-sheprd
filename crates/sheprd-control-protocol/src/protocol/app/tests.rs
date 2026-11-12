@@ -2,6 +2,8 @@
 use super::*;
 use crate::protocol::{Call, Caller, Request};
 
+mod activity;
+
 #[test]
 fn open_carries_its_folder_and_refuses_extra_fields() {
     let request = Request::App(Call {

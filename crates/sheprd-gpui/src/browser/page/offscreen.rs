@@ -70,6 +70,9 @@ pub(crate) struct Page {
     wants_focus: Cell<bool>,
     /// Whether the pointer was over the page when it last moved.
     hovered: Cell<bool>,
+    /// Whether the window sent the page a key, a press, a wheel turn, or
+    /// the pointer's place since it was last asked.
+    input: Cell<bool>,
     /// The buttons pressed over the page and not yet released, which the
     /// page hears the release of wherever the pointer is by then.
     pressed: RefCell<Vec<MouseButton>>,
@@ -104,6 +107,7 @@ impl Page {
             focused: Cell::new(false),
             wants_focus: Cell::new(false),
             hovered: Cell::new(false),
+            input: Cell::new(false),
             pressed: RefCell::default(),
             zoom: Cell::new(Zoom::default()),
             sized: Cell::new(None),
@@ -137,6 +141,7 @@ impl Page {
     /// Hands the page a press, a key, or a wheel turn, after the pointer's
     /// place if one still waits, so the page hears them in order.
     fn input(&self, event: InputEvent) {
+        self.input.set(true);
         if let Some((x, y)) = self.latest.take_moved() {
             let point = WebViewPoint::Device(DevicePoint::new(x, y));
             let moved = InputEvent::MouseMove(PageMove::new(point));
@@ -148,10 +153,16 @@ impl Page {
     /// Tells the page where the pointer is. Only the latest place waits for
     /// the engine, however fast the pointer moves.
     fn moved(&self, x: f32, y: f32) {
+        self.input.set(true);
         if self.latest.put_moved((x, y)) && !self.send(Command::Moved) {
             // Nothing queued will read the place: the next move asks again.
             self.latest.take_moved();
         }
+    }
+
+    /// Whether the window sent the page input since this was last asked.
+    pub(crate) fn took_input(&self) -> bool {
+        self.input.replace(false)
     }
 
     pub(crate) fn show(&self) {

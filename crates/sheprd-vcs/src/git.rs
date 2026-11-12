@@ -924,7 +924,7 @@ pub fn git_bytes(
 }
 
 /// Git in `checkout`, read-only and without the file monitor.
-fn command(checkout: &str, args: &[&str]) -> Command {
+pub(crate) fn command(checkout: &str, args: &[&str]) -> Command {
     let mut command = sheprd_client::new_command("git");
     command
         .args([

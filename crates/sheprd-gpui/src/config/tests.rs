@@ -67,6 +67,8 @@ mod theme_files;
 mod themes;
 mod update_channel;
 mod usage_inline;
+mod walkr;
+mod walkr_probe_path;
 mod worktrees;
 mod zen;
 

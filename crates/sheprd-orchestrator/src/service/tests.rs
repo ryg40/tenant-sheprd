@@ -7,6 +7,10 @@ fn closing_the_view_does_not_cancel_an_accepted_action() {
     let (commands, _receiver) = mpsc::sync_channel(COMMANDS);
     let cancelled = Arc::new(AtomicBool::new(false));
     let service = Service {
+        moves: Moves::new(
+            Arc::new(crate::kanban::moves::MoveGate::new(MAX_ACTIONS)),
+            Arc::default(),
+        ),
         commands,
         cancelled: cancelled.clone(),
         mailbox: Arc::default(),
@@ -33,6 +37,8 @@ mod current_beads;
 mod extras;
 mod forgejo_host;
 mod glab_mapping;
+mod kanban_history;
+mod kanban_moves;
 mod refresh;
 mod stores;
 mod syncing_count;

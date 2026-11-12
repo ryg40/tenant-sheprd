@@ -69,6 +69,9 @@ pub(crate) struct Browser {
     /// per tab, so a failure elsewhere never clears another's and sets it
     /// retrying; bounded by the tabs the store keeps.
     pub(super) failed: HashMap<TabId, SharedString>,
+    /// Which local pages show their source, and the shown files as last
+    /// read from disk.
+    pub(super) file_views: super::FileViews,
     /// Whether the VS Code server answers, asked before its pages open.
     pub(super) code_server: super::code::CodeServer,
     /// The same for each SSH host's own VS Code server, by its target.
@@ -135,6 +138,7 @@ impl Browser {
             tab_body: Default::default(),
             group_motion: Default::default(),
             failed: HashMap::new(),
+            file_views: Default::default(),
             code_server: Default::default(),
             host_code_servers: HashMap::new(),
             code_folderless: HashSet::new(),
@@ -321,9 +325,11 @@ impl SheprdWindow {
         // draw, as while the screen is locked, still makes pages, and each
         // takes the theme's light or dark as it is made. Cheap when unchanged.
         #[cfg(embedded_pages)]
-        self.browser.pages.set_theme(&self.theme);
+        self.theme_pages(cx);
         #[cfg(servo_pages)]
         self.browser.pages.free_frames(window);
+        #[cfg(embedded_pages)]
+        self.poll_walkr_page(std::time::Instant::now(), window, cx);
         #[cfg(embedded_pages)]
         self.apply_page_events(window, cx);
         #[cfg(embedded_pages)]
@@ -340,7 +346,8 @@ impl SheprdWindow {
                     Pick::Page(id) => Some(*id),
                     Pick::Herdr(_) => None,
                 })
-                .filter(|id| store.get(*id).is_none())
+                // Section and chat pages have owners outside the store.
+                .filter(|id| store.get(*id).is_none() && !id.is_panel())
                 .collect();
             #[cfg(embedded_pages)]
             let gone: HashSet<TabId> = gone
@@ -349,7 +356,6 @@ impl SheprdWindow {
                     self.browser
                         .pages
                         .ids()
-                        // A chat's panel page has no tab; its chat owns it.
                         .filter(|id| store.get(*id).is_none() && !id.is_panel()),
                 )
                 .collect();
@@ -368,6 +374,7 @@ impl SheprdWindow {
         self.poll_reveal(window, cx);
         self.poll_reviews(cx);
         self.poll_code_views(cx);
+        self.poll_file_views(cx);
         self.poll_orchestrators(window, cx);
         self.sync_addresses(false, window, cx);
     }
@@ -427,72 +434,121 @@ impl SheprdWindow {
 
     #[cfg(embedded_pages)]
     fn apply_page_events(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        use super::reports::Event;
         while let Some(event) = self.browser.pages.next_event() {
-            match event {
-                Event::Title(id, title) => {
-                    Store::update(cx, |store| store.visited(id, None, Some(&title)));
-                }
-                // The field follows on the next sync, unless someone is
-                // typing in it.
-                Event::Loaded(id, url) => {
-                    let visited = store(cx)
-                        .and_then(|store| store.get(id))
-                        .and_then(|tab| tab.location.as_ref()?.visited(&url));
-                    if let Some(location) = visited {
-                        Store::update(cx, |store| store.visited(id, Some(location), None));
-                    }
-                    self.page_loaded(id);
-                    #[cfg(servo_pages)]
-                    if self.browser.blank.loaded(id, std::time::Instant::now()) {
-                        cx.notify();
-                    }
-                    self.browser.pages.script(id, &super::favicon::script());
-                }
-                Event::Posted(id, body, from) => match super::favicon::Favicon::parse(&body) {
-                    Some(favicon) => self.page_favicon(id, favicon, window, cx),
-                    None => self.page_posted(id, &body, from, window, cx),
-                },
-                #[cfg(target_os = "macos")]
-                Event::Captured(id, capture, tiff) => self.page_captured(id, capture, tiff, cx),
-                #[cfg(servo_pages)]
-                Event::Untitled(id) => {
-                    Store::update(cx, |store| store.untitled(id));
-                }
-                #[cfg(servo_pages)]
-                Event::Failed(id, error) => {
-                    self.browser.pages.close(id);
-                    let error = crate::Error::from(error);
-                    self.browser
-                        .failed
-                        .insert(id, crate::i18n::Localize::localize(&error).into());
+            self.apply_page_event(event, window, cx);
+        }
+    }
+
+    #[cfg(embedded_pages)]
+    pub(in crate::browser) fn apply_page_event(
+        &mut self,
+        event: super::reports::Event,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use super::reports::Event;
+        match event {
+            Event::Loaded(TabId::WALKR, url) => {
+                // The address of a run's page holds its secret: it goes
+                // to the origin comparison and nowhere else.
+                if let Some(origin) = self.walkr.page_origin(&self.config.walkr) {
+                    self.walkr.page_loaded(&url, &origin);
                     cx.notify();
                 }
-                Event::NewWindow(id, url) => {
-                    if let Ok(url) = WebUrl::try_from(url.as_str())
-                        && let Some(opened) = self.open_beside(id, url, cx)
-                    {
-                        self.show_browser_tab_in(opened.0, opened.1, window, cx);
-                    }
-                }
-                #[cfg(target_os = "macos")]
-                Event::Opened(id, url, source, popup) => {
-                    // Without a tab the popup is dropped, and with it the
-                    // opener's link to it.
-                    if let Some((group, opened)) = self.open_beside(id, url, cx) {
-                        if let Err(error) = self.browser.pages.adopt(opened, source, popup, window)
-                        {
-                            tracing::warn!(%error, "Cannot show a popup's page");
-                            self.browser
-                                .failed
-                                .insert(opened, crate::i18n::Localize::localize(&error).into());
-                        }
-                        self.show_browser_tab_in(group, opened, window, cx);
-                    }
-                }
-                #[cfg(target_os = "macos")]
-                Event::Closed(id) => self.close_browser_tab(id, window, cx),
             }
+            Event::Title(TabId::WALKR, _) | Event::Posted(TabId::WALKR, ..) => {}
+            Event::Title(id, title) => {
+                Store::update(cx, |store| store.visited(id, None, Some(&title)));
+            }
+            // The field follows on the next sync, unless someone is
+            // typing in it.
+            Event::Loaded(id, url) => {
+                let visited = store(cx)
+                    .and_then(|store| store.get(id))
+                    .and_then(|tab| tab.location.as_ref()?.visited(&url));
+                if let Some(location) = visited {
+                    Store::update(cx, |store| store.visited(id, Some(location), None));
+                }
+                self.page_loaded(id);
+                #[cfg(servo_pages)]
+                if self.browser.blank.loaded(id, std::time::Instant::now()) {
+                    cx.notify();
+                }
+                self.browser.pages.script(id, &super::favicon::script());
+            }
+            Event::Posted(id, body, from) => match super::favicon::Favicon::parse(&body) {
+                Some(favicon) => self.page_favicon(id, favicon, window, cx),
+                None => self.page_posted(id, &body, from, window, cx),
+            },
+            #[cfg(target_os = "macos")]
+            Event::Captured(TabId::WALKR, ..) | Event::Closed(TabId::WALKR) => {}
+            #[cfg(target_os = "macos")]
+            Event::Captured(id, capture, tiff) => self.page_captured(id, capture, tiff, cx),
+            #[cfg(servo_pages)]
+            Event::Untitled(TabId::WALKR) => {}
+            #[cfg(servo_pages)]
+            Event::Untitled(id) => {
+                Store::update(cx, |store| store.untitled(id));
+            }
+            #[cfg(servo_pages)]
+            Event::Failed(TabId::WALKR, error) => {
+                if self.walkr.page_for.is_some()
+                    && self.walkr.page_for == self.walkr.source(&self.config.walkr)
+                {
+                    let error = crate::Error::from(error);
+                    self.fail_walkr_page(crate::i18n::Localize::localize(&error).into());
+                    cx.notify();
+                }
+            }
+            #[cfg(servo_pages)]
+            Event::Failed(id, error) => {
+                self.browser.pages.close(id);
+                let error = crate::Error::from(error);
+                self.browser
+                    .failed
+                    .insert(id, crate::i18n::Localize::localize(&error).into());
+                cx.notify();
+            }
+            Event::NewWindow(TabId::WALKR, url) => {
+                // A tab would show and save the address of a run, so a new
+                // window on the run's server is dropped.
+                if let Ok(url) = WebUrl::try_from(url.as_str())
+                    && !self.walkr.runs_on(&url)
+                {
+                    self.open_browser_tab(Some(url), window, cx);
+                }
+            }
+            Event::NewWindow(id, url) => {
+                if let Ok(url) = WebUrl::try_from(url.as_str())
+                    && let Some(opened) = self.open_beside(id, url, cx)
+                {
+                    self.show_browser_tab_in(opened.0, opened.1, window, cx);
+                }
+            }
+            #[cfg(target_os = "macos")]
+            Event::Opened(TabId::WALKR, url, _, _) => {
+                // The section has no workspace; open an unrelated tab in the
+                // focused one, but never the run's own server.
+                if !self.walkr.runs_on(&url) {
+                    self.open_browser_tab(Some(url), window, cx);
+                }
+            }
+            #[cfg(target_os = "macos")]
+            Event::Opened(id, url, source, popup) => {
+                // Without a tab the popup is dropped, and with it the
+                // opener's link to it.
+                if let Some((group, opened)) = self.open_beside(id, url, cx) {
+                    if let Err(error) = self.browser.pages.adopt(opened, source, popup, window) {
+                        tracing::warn!(%error, "Cannot show a popup's page");
+                        self.browser
+                            .failed
+                            .insert(opened, crate::i18n::Localize::localize(&error).into());
+                    }
+                    self.show_browser_tab_in(group, opened, window, cx);
+                }
+            }
+            #[cfg(target_os = "macos")]
+            Event::Closed(id) => self.close_browser_tab(id, window, cx),
         }
     }
 

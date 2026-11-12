@@ -6,7 +6,7 @@ status: shipped
 
 # Code and editors
 
-Sheprd is not an editor, but it gets you to the right line next to the agent that is changing the code. This page covers opening files in your editor, Go to Symbol and Go to File, read-only code tabs, editor groups, and VS Code and px0 tabs.
+Sheprd is not an editor, but it gets you to the right line next to the agent that is changing the code. This page covers opening files in your editor, Go to Symbol and Go to File, the file explorer, read-only code tabs, editor groups, and VS Code and px0 tabs.
 
 ## Open in your editor
 
@@ -45,6 +45,54 @@ The same search works from a pane, without the app running:
 sheprd search symbol QUERY
 sheprd search file QUERY
 ```
+
+## File explorer
+
+The file explorer is a panel on the window's right. It shows the folders of the focused pane's checkout as a tree: the folder above the pane's folder that holds `.git`, or the pane's folder when it is in no checkout. The root always holds the pane's folder: a `core.worktree` setting of the repository does not move it. Open and close it with **Toggle File Explorer** in the command palette. Bind `toggle_file_explorer` under `[keybindings]` for a key; it has none by default.
+
+Click a folder to open or close it. Click a file to open it in the view that fits it; see [Files opened from the tree](#files-opened-from-the-tree). Type in **Search files** to list the checkout's files by name instead, ranked as Go to File ranks them; this needs a Git checkout. The list follows the text a moment after you stop typing.
+
+| Key | Action |
+| --- | --- |
+| Up / Down | Move through the rows; Up on the first row goes to the search field |
+| Right | Open the folder, or step into an open one |
+| Left | Close the folder, or go to the folder holding the row |
+| Enter | Open the file, or open or close the folder |
+| Escape | Clear the search, then return to the terminal |
+
+The tree is read when the panel opens and when you press the refresh button; it does not watch the disk. A folder that is gone from the disk closes on refresh. The button beside the search field closes every folder. Drag the panel's left edge to resize it.
+
+The terminals always keep 240 pixels of width. When the window is too narrow for that, the mod panel (the column of mod sections) yields first: it narrows, then steps aside. Only then does the file explorer narrow, and step aside in turn. Both come back when the window is wide enough.
+
+### Files opened from the tree
+
+A Markdown or HTML file gets the same view from the tree as from `sheprd browser open FILE` or the switch of a tab. One rule decides it:
+
+| File | View |
+| --- | --- |
+| Markdown or HTML (`.md`, `.markdown`, `.html`, `.htm`) | The rendered page, in a [browser tab](browser.md#local-pages). An HTML page runs its own scripts |
+| Markdown or HTML in a hidden folder (such as `.local/`), or directly in your home folder | Its source, read-only. The bar above it says why it has no page |
+| Markdown or HTML, in a build that cannot render pages (Linux without the `servo` feature) | Its source, read-only. The bar says why |
+| Any other file | A [code tab](#code-tabs) |
+
+For any other file, the two differ. The tree shows it as code. `sheprd browser open FILE` shows it as a page, because the caller asked for a page, and refuses it in a hidden folder.
+
+A Markdown or HTML file has [the file bar](browser.md#the-file-bar) above it, as a page and as source: a breadcrumb of its path, and the switch between **Rendered** and **Source**. Click a folder of the breadcrumb to show the file explorer with that folder open. This works for a folder that the explorer lists; the file's own name is not a link.
+
+The tree marks the file that the active tab shows, whether the tab shows its page, its source, or its code.
+
+### What the tree lists
+
+- Files Git ignores are listed, dimmed. `.git` is never listed.
+- A symbolic link is listed and never followed, so nothing outside the checkout is read.
+- A folder lists its first 2,000 entries by name, of the first 8,000 it reads, and says when it holds more. At most 256 folders are open at once, and a refresh reads four folders at a time.
+- A name with a colon or a backslash is listed and opens on macOS and Linux. On Windows, where they separate names and drives, such a path is refused.
+- A name with a control character or a text direction override, or longer than 255 bytes, is not listed; the folder says it holds more.
+- Each folder on the way to a file is checked to be a real folder before it is read. A program that swaps a folder for a link between the check and the read can make a listing show names from outside the checkout; it needs write access to the checkout to do so.
+- On Windows, `sheprd files reveal` and the mark on the active tab's file may not find a path, because the resolved path and Git's path are written differently. Windows and macOS are not verified yet.
+- Only local checkouts are listed. A workspace on an SSH or cloud host shows "Files are not available for a remote host yet."
+
+Agents and scripts use `sheprd files show|hide|toggle`, and `sheprd files reveal PATH` to select a file in the tree. These show the panel and leave the keyboard in the terminal; the palette command gives the panel the keyboard. The tree is that of the window's focused pane, so `reveal` refuses a file of another checkout.
 
 ## Code tabs
 

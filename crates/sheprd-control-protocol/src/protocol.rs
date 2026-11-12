@@ -6,11 +6,14 @@ pub mod app;
 pub mod chat;
 pub mod cloud;
 pub mod events;
+pub mod files;
 pub mod hosts;
 pub mod mods;
+pub mod orchestrator;
 pub mod remote;
 pub mod settings;
 pub mod tabs;
+pub mod walkr;
 pub mod work;
 
 use serde::{Deserialize, Serialize};
@@ -30,8 +33,13 @@ pub enum Placement {
 /// an outdated app from a refused request. 3: `browser.open` placement.
 /// 4: `link`. 5: the `tab` family's `zoom`. 6: the `cloud` family. 7: `chat`.
 /// 8: `host` `automation_approve`. 9: `remote`. 10: `settings` `language`.
-/// 11: `mod`. 12: `window` `alerts`.
-pub const PROTOCOL_VERSION: u32 = 12;
+/// 11: `mod`. 12: `window` `alerts`. 13: `walkr`. 14: `files`.
+/// 15: `ui` `panel` `walkr`. 16: walkr reply without sign_in_needed.
+/// 17: walkr connect, disconnect, source, live. 18: walkr status sessions.
+/// 19: `ui` `panel` `kanban` and revision-fenced `orchestrator` `board` reads.
+/// 20: `orchestrator` `board order` changes local lane preferences only.
+/// 21: `orchestrator` `board` includes per-lane Done history coverage.
+pub const PROTOCOL_VERSION: u32 = 21;
 
 /// Older apps and clients know only tabs, so a tab is left off the wire.
 fn is_tab(placement: &Placement) -> bool {
@@ -85,6 +93,12 @@ pub enum Request {
     Remote(Call<remote::RemoteOp>),
     #[serde(rename = "mod")]
     Mod(Call<mods::ModOp>),
+    #[serde(rename = "walkr")]
+    Walkr(Call<walkr::WalkrOp>),
+    #[serde(rename = "files")]
+    Files(Call<files::FilesOp>),
+    #[serde(rename = "orchestrator")]
+    Orchestrator(Call<orchestrator::OrchestratorOp>),
 }
 
 /// A `herdr-gpui://` link the shell started a second copy of the app with.
@@ -115,6 +129,8 @@ impl Request {
             Self::Settings(call) => call.op.wait_seconds(),
             Self::Cloud(call) => call.op.wait_seconds(),
             Self::Remote(call) => call.op.wait_seconds(),
+            Self::Walkr(_) => walkr::WAIT_SECONDS,
+            Self::Files(call) => call.op.wait_seconds(),
             _ => 0,
         };
         wait.min(MAX_WAIT_SECONDS)
@@ -160,6 +176,10 @@ pub struct BrowserOpen {
     pub focus: bool,
     #[serde(default, skip_serializing_if = "is_tab")]
     pub placement: Placement,
+    /// Whether a local Markdown or HTML file opens as its source. Older
+    /// apps do not know it, so `false` is left off the wire.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub source: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -203,6 +223,19 @@ pub enum OpenedIn {
     SystemBrowser,
 }
 
+/// Why an opened local file shows as its source, not as a page.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SourceWhy {
+    /// The request asked for the source.
+    Asked,
+    /// The file's folder is never served as a page: it is hidden, or it
+    /// holds the home directory.
+    Folder,
+    /// This build shows no pages inside the window.
+    Build,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {
@@ -232,6 +265,10 @@ pub enum Response {
         /// the window could split.
         #[serde(default, skip_serializing_if = "is_tab")]
         placement: Placement,
+        /// Set when a local file shows as its source, with the reason.
+        /// Older clients do not know it, so a page leaves it off the wire.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source: Option<SourceWhy>,
     },
     Reloaded {
         tabs: usize,
@@ -278,6 +315,15 @@ pub enum Response {
     Mod {
         reply: mods::Reply,
     },
+    Walkr {
+        reply: walkr::Reply,
+    },
+    Files {
+        reply: files::Reply,
+    },
+    Orchestrator {
+        reply: orchestrator::BoardReply,
+    },
     Error {
         code: ErrorCode,
         message: String,
@@ -316,6 +362,7 @@ mod tests {
             },
             focus: true,
             placement: Placement::Tab,
+            source: false,
         });
         let text = serde_json::to_string(&request).unwrap();
         assert_eq!(
@@ -331,6 +378,7 @@ mod tests {
             beside,
             Request::Open(BrowserOpen {
                 placement: Placement::Beside,
+                source: false,
                 ..
             })
         ));
@@ -343,8 +391,18 @@ mod tests {
             Request::Open(BrowserOpen {
                 page: Page::File(_),
                 caller: Caller { pane_id: None, .. },
+                source: false,
                 ..
             })
+        ));
+        // A file asked for as its source says so; nothing else carries it.
+        let source: Request = serde_json::from_str(
+            r#"{"method":"browser.open","page":{"file":"/srv/a.md"},"caller":{},"focus":true,"source":true}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            source,
+            Request::Open(BrowserOpen { source: true, .. })
         ));
         let feedback: Request = serde_json::from_str(
             r#"{"method":"browser.feedback","pane_id":"w_1:p1","wait_seconds":30}"#,
@@ -411,11 +469,13 @@ mod tests {
                 opened_in: OpenedIn::Tab,
                 workspace_id: Some("w_1".into()),
                 placement: Placement::Tab,
+                source: None,
             },
             Response::Opened {
                 opened_in: OpenedIn::Tab,
                 workspace_id: Some("w_1".into()),
                 placement: Placement::Beside,
+                source: Some(SourceWhy::Folder),
             },
             Response::error(ErrorCode::WorkspaceNotFound, "No window shows w_9"),
             Response::Reloaded { tabs: 2 },

@@ -99,6 +99,7 @@ impl Localize for Error {
             // their parser's.
             Self::Io(error) => error.to_string(),
             Self::Json(error) => error.to_string(),
+            Self::Kanban(error) => error.localize(),
             Self::Keymap(error) => error.localize(),
             #[cfg(windows)]
             Self::LaunchAtLogin(error) => error.localize(),
@@ -213,6 +214,8 @@ impl Localize for Error {
             Self::Update(error) => error.localize(),
             Self::Usage(error) => error.localize(),
             Self::Vcs(error) => error.localize(),
+            // Walkr currently reports only through the English CLI.
+            Self::Walkr(error) => error.to_string(),
             #[cfg(any(target_os = "macos", windows))]
             Self::WebView(error) => fl!("error-web-view", error = error.to_string()),
             #[cfg(any(target_os = "macos", windows))]

@@ -66,6 +66,13 @@ pub enum ItemsOf {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum OrchestratorCommand {
+    Board {
+        cursor: Option<String>,
+    },
+    BoardOrder {
+        lane: String,
+        before: Option<String>,
+    },
     Open {
         repo: Option<PathBuf>,
     },
@@ -125,6 +132,7 @@ pub(super) fn orchestrator(args: &mut Args) -> Result<OrchestratorCommand, CliEr
         None | Some("open") if forgejo.is_none() => {
             return Ok(OrchestratorCommand::Open { repo });
         }
+        Some("board") => return super::kanban::parse(args, repo.is_some(), forgejo.is_some()),
         Some("items") => Items::All,
         Some("issues") => Items::Issues,
         Some("prs") => Items::PullRequests,

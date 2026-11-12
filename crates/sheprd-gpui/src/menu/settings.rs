@@ -345,6 +345,7 @@ impl SheprdWindow {
                 | Command::ReviewChanges
                 | Command::GitMenu
                 | Command::ToggleAnnotate
+                | Command::ToggleSource
                 | Command::SplitEditor
                 | Command::MoveTabPrevious
                 | Command::MoveTabNext
@@ -392,6 +393,7 @@ impl SheprdWindow {
                 | Command::RemotePair
                 | Command::ToggleStatusBar
                 | Command::ToggleModPanel
+                | Command::ToggleFileExplorer
                 | Command::FocusNextRegion
                 | Command::FocusPreviousRegion
                 | Command::ToggleZenMode

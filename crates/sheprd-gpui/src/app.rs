@@ -253,10 +253,7 @@ pub(crate) fn run() -> std::process::ExitCode {
     let LaunchOptions { target, mut mode } = match LaunchOptions::parse(&args) {
         Ok(options) => options,
         Err(error) if json_errors => {
-            println!(
-                "{}",
-                serde_json::json!({ "error": { "code": "usage", "message": error.to_string() } })
-            );
+            println!("{}", error.json());
             return std::process::ExitCode::from(2);
         }
         Err(error) => {

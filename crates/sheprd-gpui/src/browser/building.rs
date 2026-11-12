@@ -22,10 +22,37 @@ pub(super) fn start(
     id: TabId,
     number: u64,
     builder: wry::WebViewBuilder<'static>,
+    pending_url: Option<String>,
     window: &mut Window,
     cx: &mut Context<SheprdWindow>,
 ) {
     cx.spawn_in(window, async move |this, cx| {
+        if id == TabId::WALKR {
+            // The version lookup can read the runtime installation. Keep it
+            // off the UI thread, and refuse before the engine loads the URL.
+            let private = cx
+                .background_executor()
+                .spawn(async {
+                    let version = wry::webview_version()
+                        .map_err(crate::walkr::Error::PrivateRuntimeUnavailable)?;
+                    crate::walkr::privacy::check_runtime(&version)
+                })
+                .await;
+            if !this
+                .update(cx, |this, _| {
+                    this.browser.pages.is_current_build(id, number)
+                })
+                .unwrap_or(false)
+            {
+                return;
+            }
+            if let Err(error) = private {
+                let _ = this.update_in(cx, |this, window, cx| {
+                    this.page_built(id, number, Err(error.into()), None, window, cx)
+                });
+                return;
+            }
+        }
         // Read while the window is known to be open, in the poll in which
         // the build starts and makes its child of it.
         let Ok(parent) = cx.update(|window, _| parent(window)) else {
@@ -39,7 +66,7 @@ pub(super) fn start(
             Err(error) => Err(error),
         };
         let _ = this.update_in(cx, |this, window, cx| {
-            this.page_built(id, number, built, window, cx)
+            this.page_built(id, number, built, pending_url.as_deref(), window, cx)
         });
     })
     .detach();
@@ -78,13 +105,22 @@ impl SheprdWindow {
         id: TabId,
         number: u64,
         built: crate::Result<wry::WebView>,
+        pending_url: Option<&str>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let Some(build) = self.browser.pages.finish_building(id, number) else {
             return;
         };
-        match built.and_then(|view| self.browser.pages.add(id, view, window)) {
+        match built.and_then(|view| {
+            // The async construction can outlive Close or a reconnect.
+            // Only the accepted Walkr view may load its retained address.
+            if let Some(url) = pending_url {
+                view.load_url(url)
+                    .map_err(crate::walkr::Error::PageNavigation)?;
+            }
+            self.browser.pages.add(id, view, window)
+        }) {
             Ok(()) => {
                 self.browser.failed.remove(&id);
                 if let Some(location) = build.location {
@@ -92,6 +128,13 @@ impl SheprdWindow {
                 }
             }
             Err(error) => {
+                let error = match error {
+                    crate::Error::Walkr(_) => error,
+                    error if id == TabId::WALKR => {
+                        crate::walkr::Error::PageConstruction(Box::new(error)).into()
+                    }
+                    error => error,
+                };
                 tracing::warn!(%error, "Cannot create a browser page");
                 self.browser
                     .failed

@@ -160,6 +160,18 @@ impl Args {
             }),
         }
     }
+
+    /// As `finish`, for a command whose arguments may hold a secret: the
+    /// error names none of what is left over, and nothing stays for a later
+    /// `finish` to name.
+    pub(crate) fn finish_unnamed(&mut self) -> Result<(), CliError> {
+        let trailing = self.trailing.take();
+        if self.rest.is_empty() && trailing.is_none() {
+            return Ok(());
+        }
+        self.rest.clear();
+        Err(CliError::UnexpectedUnnamed(self.command))
+    }
 }
 
 pub(crate) fn utf8(value: OsString) -> Result<String, CliError> {

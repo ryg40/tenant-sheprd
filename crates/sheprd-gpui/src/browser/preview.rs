@@ -67,6 +67,9 @@ type Responder = Box<dyn FnOnce(Answer) + Send>;
 struct Job {
     root: PathBuf,
     path: String,
+    /// The window's theme, for a Markdown file's page; empty for any other
+    /// request, which has no use for it.
+    theme: String,
     responder: Responder,
 }
 
@@ -107,7 +110,7 @@ fn content_type(path: &Path) -> &'static str {
 
 /// Reads `path` under `root`, refusing anything a link leads out of the
 /// folder, anything that is not a regular file, and anything too large.
-fn read(root: &Path, request_path: &str) -> Result<(Vec<u8>, &'static str), u16> {
+fn read(root: &Path, request_path: &str, theme: &str) -> Result<(Vec<u8>, &'static str), u16> {
     let file = requested_file(root, request_path).ok_or(404_u16)?;
     let root = root.canonicalize().map_err(|_| 404_u16)?;
     let resolved = file.canonicalize().map_err(|_| 404_u16)?;
@@ -127,7 +130,7 @@ fn read(root: &Path, request_path: &str) -> Result<(Vec<u8>, &'static str), u16>
             .file_name()
             .and_then(|name| name.to_str())
             .unwrap_or_default();
-        let page = markdown::page(&String::from_utf8_lossy(&bytes), name);
+        let page = markdown::page(&String::from_utf8_lossy(&bytes), name, theme);
         return Ok((page.into_bytes(), "text/html; charset=utf-8"));
     }
     Ok((bytes, content_type(&resolved)))
@@ -161,7 +164,7 @@ impl Preview {
             .name("browser-preview".into())
             .spawn(move || {
                 for job in queue {
-                    (job.responder)(match read(&job.root, &job.path) {
+                    (job.responder)(match read(&job.root, &job.path, &job.theme) {
                         Ok((bytes, kind)) => Answer::new(200, kind, bytes),
                         Err(status) => Answer::refused(status),
                     });
@@ -195,9 +198,15 @@ impl Preview {
             responder(Answer::new(200, kind, body));
             return;
         }
+        let theme = if markdown::is_markdown(Path::new(path.split('?').next().unwrap_or(path))) {
+            self.theme.borrow().clone()
+        } else {
+            String::new()
+        };
         let job = Job {
             root: root.to_owned(),
             path: path.to_owned(),
+            theme,
             responder: Box::new(responder),
         };
         if let Err(TrySendError::Full(job) | TrySendError::Disconnected(job)) =
@@ -223,23 +232,23 @@ mod tests {
         std::fs::write(site.join("index.html"), "<h1>hi</h1>").unwrap();
         std::fs::write(site.join("css/app.css"), "h1{}").unwrap();
         std::fs::write(dir.path().join("secret.txt"), "no").unwrap();
-        let (bytes, kind) = read(&site, "/").unwrap();
+        let (bytes, kind) = read(&site, "/", "").unwrap();
         assert_eq!(
             (bytes.as_slice(), kind),
             (&b"<h1>hi</h1>"[..], "text/html; charset=utf-8")
         );
         assert_eq!(
-            read(&site, "/css/app.css").unwrap().1,
+            read(&site, "/css/app.css", "").unwrap().1,
             "text/css; charset=utf-8"
         );
-        assert_eq!(read(&site, "/missing.html"), Err(404));
-        assert_eq!(read(&site, "/../secret.txt"), Err(404));
-        assert_eq!(read(&site, "/css"), Err(404));
+        assert_eq!(read(&site, "/missing.html", ""), Err(404));
+        assert_eq!(read(&site, "/../secret.txt", ""), Err(404));
+        assert_eq!(read(&site, "/css", ""), Err(404));
         #[cfg(unix)]
         {
             std::os::unix::fs::symlink(dir.path().join("secret.txt"), site.join("link.txt"))
                 .unwrap();
-            assert_eq!(read(&site, "/link.txt"), Err(403));
+            assert_eq!(read(&site, "/link.txt", ""), Err(403));
         }
     }
 

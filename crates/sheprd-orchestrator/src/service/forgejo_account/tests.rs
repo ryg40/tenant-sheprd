@@ -4,7 +4,9 @@
 use super::*;
 use crate::{Checkpoint, Item, ItemKey, Provider, RemoteScope, SourceKey};
 
-const HOST: &str = "forgejo.example.com";
+mod kanban_history;
+
+const HOST: &str = "forgejo.example.test";
 
 fn issue(repository: &str, number: u64) -> Item {
     let mut item = Item::stand_in(ItemKey {

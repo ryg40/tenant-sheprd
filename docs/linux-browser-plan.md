@@ -261,7 +261,8 @@ cargo build -p sheprd-gpui --features servo
 A Servo tab keeps its cookies and site storage from one run of the app to
 the next, so a restart does not sign every tab out, and a tab restored in
 the middle of a sign-in can finish it. Servo 0.8.0 keeps this data in one
-folder it is given (`Opts::config_dir`, as its own shell uses it):
+folder it is given (`Opts::config_dir`, as its own shell uses it).
+The Walkr section's page uses this same folder:
 
 ```text
 ~/.local/state/herdr/gpui/browser-data/     ($XDG_STATE_HOME/herdr/gpui/...)
@@ -319,8 +320,9 @@ confirms there.
   "wry has no working GPUI child-view backend on Linux yet".
   `browser/page.rs` lays a native view out where its group draws.
 - `browser::EMBEDDED` is `false` on Linux. `control::open_browser` then opens
-  web addresses in the system browser and refuses local files with
-  `ErrorCode::Unsupported`.
+  web addresses in the system browser and gives a local file a tab that
+  shows its source (it refused local files with `ErrorCode::Unsupported`
+  before the file view).
 - About 160 `cfg(any(target_os = "macos", windows))` gates across 26 files
   leave out the parts that need a page: `browser/native.rs` (web views),
   `browser/preview.rs` (the `herdr-preview` scheme serving local files and

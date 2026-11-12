@@ -77,7 +77,26 @@ impl SourceKey {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+/// Parses the existing escaped source format for every provider.
+impl FromStr for SourceKey {
+    type Err = Error;
+
+    fn from_str(value: &str) -> Result<Self> {
+        let mut parts = value.split(':');
+        let (Some(provider), Some(host), Some(repository), None) =
+            (parts.next(), parts.next(), parts.next(), parts.next())
+        else {
+            return Err(Error::SourceKey(value.to_owned()));
+        };
+        Ok(Self {
+            provider: provider.parse()?,
+            host: uncomponent(host),
+            repository: uncomponent(repository),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ItemKey {
     pub source: SourceKey,
     /// An issue's number, `pr/<number>` for a GitHub or Forgejo pull request
@@ -96,19 +115,18 @@ impl FromStr for ItemKey {
     type Err = Error;
 
     fn from_str(value: &str) -> Result<Self> {
-        let parts: Vec<&str> = value.split(':').collect();
-        let [provider, host, repository, native_id] = parts[..] else {
+        let Some((source, native_id)) = value.rsplit_once(':') else {
             return Err(Error::ItemKey(value.to_owned()));
         };
         if native_id.is_empty() {
             return Err(Error::ItemKey(value.to_owned()));
         }
+        let source = source.parse().map_err(|error| match error {
+            Error::SourceKey(_) => Error::ItemKey(value.to_owned()),
+            other => other,
+        })?;
         Ok(Self {
-            source: SourceKey {
-                provider: provider.parse()?,
-                host: uncomponent(host),
-                repository: uncomponent(repository),
-            },
+            source,
             native_id: uncomponent(native_id),
         })
     }
@@ -182,7 +200,7 @@ pub struct Activity {
 }
 
 /// An issue, pull request, or bead.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Item {
     pub key: ItemKey,
     /// What the user reads: `#377`, or a Beads id.

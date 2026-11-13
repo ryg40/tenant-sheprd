@@ -8,7 +8,7 @@ use super::Page;
 use crate::{
     SheprdWindow,
     i18n::{Localize, fl},
-    local_ports::Pending,
+    local_ports::{Batch, Pending, uptime_text},
 };
 use gpui::{prelude::*, *};
 use sheprd_control_protocol::protocol::hosts::PortAction;
@@ -58,32 +58,72 @@ impl SheprdWindow {
             return div();
         };
         let count = pending.victims().len();
-        let (title, note, confirm) = match pending.action {
-            PortAction::Pause => (
+        let (title, note, confirm) = match (pending.action, pending.batch) {
+            (PortAction::Stop, Batch::Orphaned) => (
+                fl!("local-ports-confirm-orphaned-title", count = count),
+                fl!("local-ports-confirm-orphaned-note"),
+                fl!("local-ports-confirm-stop"),
+            ),
+            (PortAction::Pause, _) => (
                 fl!("local-ports-confirm-pause-title", count = count),
                 fl!("local-ports-confirm-pause-note"),
                 fl!("local-ports-confirm-pause"),
             ),
-            PortAction::Stop | PortAction::Resume => (
+            (PortAction::Stop | PortAction::Resume, _) => (
                 fl!("local-ports-confirm-stop-title", count = count),
                 fl!("local-ports-confirm-stop-note"),
                 fl!("local-ports-confirm-stop"),
             ),
         };
+        // Only the orphan batch says what each process is and how long it
+        // has run: its rows were chosen by a rule, not by the user's click.
+        let detailed = pending.batch == Batch::Orphaned;
+        let now = std::time::SystemTime::now();
+        let small = px(self.config.ui.size - 1.);
         let rows = pending
             .listeners
             .iter()
             .enumerate()
             .map(|(index, listener)| {
-                div()
-                    .debug_selector(move || format!("port-signal-row-{index}"))
-                    .truncate()
-                    .child(fl!(
-                        "local-ports-confirm-row",
-                        process = listener.process.as_str(),
-                        pid = listener.identity.pid,
-                        address = listener.address()
-                    ))
+                let line = fl!(
+                    "local-ports-confirm-row",
+                    process = listener.process.as_str(),
+                    pid = listener.identity.pid,
+                    address = listener.address()
+                );
+                let row = div().debug_selector(move || format!("port-signal-row-{index}"));
+                if !detailed {
+                    return row.truncate().child(line);
+                }
+                // What runs it and for how long, then its command line.
+                let detail = match listener.uptime(now) {
+                    Some(uptime) => fl!(
+                        "local-ports-confirm-detail",
+                        name = listener.name.as_str(),
+                        uptime = uptime_text(uptime).to_string()
+                    ),
+                    None => listener.name.clone(),
+                };
+                row.flex()
+                    .flex_col()
+                    .min_w_0()
+                    .child(div().truncate().child(line))
+                    .child(
+                        div()
+                            .truncate()
+                            .text_size(small)
+                            .text_color(rgb(theme.subtext()))
+                            .child(detail),
+                    )
+                    .when(!listener.command.is_empty(), |row| {
+                        row.child(
+                            div()
+                                .truncate()
+                                .text_size(small)
+                                .text_color(rgb(theme.muted))
+                                .child(listener.command.clone()),
+                        )
+                    })
             });
         div()
             .debug_selector(|| "port-signal".into())
@@ -98,8 +138,8 @@ impl SheprdWindow {
                     .id("port-signal-list")
                     .flex()
                     .flex_col()
-                    .gap(px(4.))
-                    .max_h(px(240.))
+                    .gap(px(if detailed { 8. } else { 4. }))
+                    .max_h(px(if detailed { 300. } else { 240. }))
                     .overflow_y_scroll()
                     .children(rows),
             )

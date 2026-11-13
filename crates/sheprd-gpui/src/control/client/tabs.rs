@@ -157,6 +157,9 @@ pub(super) fn orchestrator(
 ) -> crate::Result<Output> {
     match command {
         OrchestratorCommand::Board { cursor } => super::kanban::read(cursor, context),
+        OrchestratorCommand::BoardMove { item, lane, to } => {
+            super::kanban::propose(item, lane, to, context)
+        }
         OrchestratorCommand::BoardOrder { lane, before } => {
             super::kanban::order(lane, before, context)
         }

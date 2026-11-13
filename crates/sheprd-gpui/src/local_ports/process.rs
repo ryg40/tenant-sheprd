@@ -7,8 +7,11 @@
 //! that process alone, never to a group or a name, and through [`Pinned`]
 //! where the OS can hold it.
 
-use super::{Listener, Outcome, naming, pinned::Pinned, scan::Socket};
-use crate::processes::Identity;
+use super::{Listener, Outcome, Started, naming, pinned::Pinned, scan::Socket};
+use crate::{
+    listening_ports::{socket, token},
+    processes::Identity,
+};
 use sheprd_control_protocol::protocol::hosts::PortAction;
 use std::{
     cell::RefCell,
@@ -153,6 +156,7 @@ pub(super) fn describe(
             .with_cwd(UpdateKind::Always)
             .with_cmd(UpdateKind::Always)
             .with_exe(UpdateKind::Always)
+            .with_environ(UpdateKind::Always)
             .with_user(UpdateKind::Always),
     );
     let usage = sampler.sample(&pids);
@@ -199,9 +203,28 @@ pub(super) fn describe(
                 cpu,
                 memory,
                 paused: process.status() == ProcessStatus::Stop,
+                started: started(process.environ()),
             })
         })
         .collect()
+}
+
+/// The Herdr pane an environment names, read as the workspace chips' scan
+/// reads it: the first of each variable, bounded, and only short tokens.
+pub(crate) fn started(environment: &[std::ffi::OsString]) -> Option<Started> {
+    let value = |name: &str| {
+        environment.iter().find_map(|entry| {
+            let entry = entry.to_str()?;
+            entry.strip_prefix(name)?.strip_prefix('=')
+        })
+    };
+    let workspace = value("HERDR_WORKSPACE_ID").filter(|id| token(id))?;
+    let pane = value("HERDR_PANE_ID").filter(|id| token(id))?;
+    Some(Started {
+        pane: pane.to_owned(),
+        socket: value("HERDR_SOCKET_PATH").map_or("", socket).to_owned(),
+        workspace: workspace.to_owned(),
+    })
 }
 
 /// Looks `pid` up afresh.

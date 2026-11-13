@@ -66,6 +66,7 @@ pub(super) fn serve(
         HostOp::SignalPort { port, action } => {
             return local_ports::act(caller, port, action, incoming, watches, cx);
         }
+        HostOp::PruneOrphanedPorts => return local_ports::prune(caller, incoming, watches, cx),
         HostOp::Usage => in_window(caller, cx, |view, _, _| usage(view, SystemTime::now())),
         HostOp::System => in_window(caller, cx, |view, _, _| system(view)),
         HostOp::Security => in_window(caller, cx, |view, _, _| security::alerts(view)),

@@ -6,6 +6,8 @@ use std::{
 };
 use uuid::Uuid;
 
+pub use super::error::PermissionStep;
+
 use super::{
     BoardColumn, Error, Result,
     config::LabelMap,
@@ -50,10 +52,17 @@ pub struct Labels {
     pub in_review: Option<Label>,
 }
 
+/// Stable provider database IDs, not the reusable repository path or issue number.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Identity {
+    Forgejo { repository: u64, issue: u64 },
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Fresh {
     pub context: Context,
     pub facts: WorkflowFacts,
+    pub identity: Identity,
     pub item: Item,
     pub labels: Labels,
 }
@@ -159,6 +168,9 @@ impl MovePlan {
     pub fn context(&self) -> &Context {
         &self.before.context
     }
+    pub(crate) fn identity(&self) -> Identity {
+        self.before.identity
+    }
     pub fn destination(&self) -> BoardColumn {
         self.destination
     }
@@ -167,6 +179,17 @@ impl MovePlan {
     }
     pub fn mutations(&self) -> &[Mutation] {
         &self.mutations
+    }
+    /// The exact definition already resolved during preflight, for native confirmation.
+    pub fn label_name(&self, id: &LabelId) -> Option<&str> {
+        [
+            &self.before.labels.in_progress,
+            &self.before.labels.in_review,
+        ]
+        .into_iter()
+        .flatten()
+        .find(|label| &label.id == id)
+        .map(|label| label.name.as_str())
     }
     pub fn operation(&self) -> Uuid {
         self.operation
@@ -185,6 +208,7 @@ impl MovePlan {
     pub fn revalidate(&self, fresh: &Fresh) -> Result<()> {
         validate_fresh(&self.card, fresh)?;
         if fresh.context != self.before.context
+            || fresh.identity != self.before.identity
             || fresh.item.state != self.before.item.state
             || fresh.labels != self.before.labels
             || label_set(fresh) != label_set(&self.before)
@@ -196,7 +220,7 @@ impl MovePlan {
 
     pub(crate) fn observation(&self, fresh: Fresh) -> Result<Record> {
         validate_fresh(&self.card, &fresh)?;
-        if fresh.context != self.before.context {
+        if fresh.context != self.before.context || fresh.identity != self.before.identity {
             return Err(Error::StaleMove);
         }
         Ok(Record {
@@ -264,7 +288,15 @@ fn validate_fresh(card: &CardKey, fresh: &Fresh) -> Result<()> {
         return Err(Error::Route);
     }
     if fresh.context.account.trim().is_empty() {
-        return Err(Error::MovePermission);
+        return Err(Error::MovePermission {
+            step: PermissionStep::AccountIdentity,
+            status: None,
+        });
+    }
+    match (card.item.source.provider, fresh.identity) {
+        (Provider::Forgejo, Identity::Forgejo { repository, issue })
+            if repository > 0 && issue > 0 => {}
+        _ => return Err(Error::Route),
     }
     if fresh.item.pull_request.is_some()
         || fresh
@@ -368,8 +400,8 @@ impl Drop for MovePermit {
     }
 }
 
-/// No Clone, Deserialize, public fields, or production constructor. Part 8 adds
-/// the native dialog's consuming path; neither a command nor a drop can mint it.
+/// Private approval built only after consuming a preparation-issued ticket.
+/// Neither a command nor a drop can construct it.
 #[derive(Debug)]
 pub struct ConfirmedMove {
     permit: MovePermit,
@@ -377,6 +409,14 @@ pub struct ConfirmedMove {
 }
 
 impl ConfirmedMove {
+    pub(crate) fn approved(plan: Arc<MovePlan>, permit: MovePermit) -> Self {
+        Self { permit, plan }
+    }
+
+    pub(crate) fn plan(&self) -> &MovePlan {
+        &self.plan
+    }
+
     #[cfg(test)]
     pub(crate) fn from_dialog(plan: Arc<MovePlan>, permit: MovePermit) -> Self {
         Self { permit, plan }

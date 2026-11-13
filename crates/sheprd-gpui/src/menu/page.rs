@@ -177,6 +177,9 @@ pub(crate) enum WorkspaceMenuAction {
     Script(crate::worktree_scripts::ScriptKind),
     /// Show the repository's issues in the activity bar.
     Orchestrator,
+    /// Ask to stop the workspace's servers on this computer whose panes
+    /// are closed.
+    StopOrphans,
     /// Build the repository's sandbox images ahead of a dispatch.
     #[cfg(feature = "cloud")]
     SandboxImages,
@@ -272,6 +275,7 @@ impl WorkspaceMenuAction {
             Self::Checkpoints => "icons/refresh.svg",
             Self::FanOut => "icons/fan-out.svg",
             Self::Orchestrator => "icons/github.svg",
+            Self::StopOrphans => "icons/x.svg",
             #[cfg(feature = "cloud")]
             Self::SandboxImages => "icons/cloud/container.svg",
             Self::Script(crate::worktree_scripts::ScriptKind::Setup) => "icons/refresh.svg",

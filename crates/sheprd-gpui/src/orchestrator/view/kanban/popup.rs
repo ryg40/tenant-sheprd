@@ -72,6 +72,7 @@ impl OrchestratorView {
             return;
         }
         match event.keystroke.key.as_str() {
+            "m" => self.open_move_menu(window, cx),
             "escape" => self.close_kanban_popup(window, cx),
             "up" | "k" if self.detail.is_some() => self.step_kanban_detail(-1, cx),
             "down" | "j" if self.detail.is_some() => self.step_kanban_detail(1, cx),

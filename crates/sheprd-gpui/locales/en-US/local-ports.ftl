@@ -76,3 +76,24 @@ local-ports-confirm-row = { $process } (pid { $pid }) on { $address }
 local-ports-confirm-cancel = Cancel
 local-ports-confirm-stop = Stop
 local-ports-confirm-pause = Pause
+
+# Servers whose Herdr pane is closed while they still run ("orphaned").
+# A row's tag; its tooltip is listening-ports-orphaned.
+local-ports-orphaned = Pane closed
+# The button in the Ports section and the row in a workspace's menu that
+# ask to stop every such server at once.
+local-ports-prune = Stop orphaned servers…
+# The question before stopping them.
+local-ports-confirm-orphaned-title = { $count ->
+    [one] Stop this orphaned server?
+   *[other] Stop these { $count } orphaned servers?
+}
+local-ports-confirm-orphaned-note = The panes that started them are closed. Each is asked to quit, and killed if it is still running a few seconds later. A process whose pid now names another process is skipped.
+# A row's second line: $name is what runs (vite), $uptime like "up 5m".
+local-ports-confirm-detail = { $name }, { $uptime }
+# What a request to stop them says when it does not ask.
+local-ports-prune-none = No orphaned servers on this computer
+local-ports-prune-busy = Close the open dialog first, then try again
+local-ports-prune-timeout = This computer's ports were not read in time; try again
+# $error says why.
+local-ports-prune-failed = Could not list the orphaned servers: { $error }

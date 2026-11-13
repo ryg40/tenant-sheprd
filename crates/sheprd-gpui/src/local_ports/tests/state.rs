@@ -121,6 +121,7 @@ fn a_stopped_worker_is_reported() {
 fn each_process_is_signalled_once_however_many_ports_it_holds() {
     let pending = Pending {
         action: PortAction::Stop,
+        batch: Batch::Chosen,
         listeners: vec![
             listener(3000, 4242, 10),
             listener(3001, 4242, 10),

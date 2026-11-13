@@ -61,6 +61,9 @@ impl SheprdWindow {
         }
         let hosts = self.watched_hosts();
         let changed = self.listening_ports.poll(hosts);
+        // Only the daemons this window shows are asked whether a pane closed.
+        let daemons = self.connected_hosts(crate::listening_ports::Daemon::of);
+        self.listening_ports.ask(daemons);
         // A tunnel lives as long as its remote port is listed at the address
         // it dials and its SSH child runs; either ending removes its close
         // button.
@@ -99,13 +102,10 @@ impl SheprdWindow {
         self.connected_hosts(crate::usage::Host::of)
     }
 
-    /// The hosts `host` finds for the enabled endpoints `watched_hosts` would
-    /// watch. A cloud machine is only reached while it is connected, so a
-    /// stopped one is never woken by a monitor.
-    fn connected_hosts(
-        &self,
-        host: fn(&sheprd_client::ConnectTarget) -> Option<crate::usage::Host>,
-    ) -> Vec<crate::usage::Host> {
+    /// What `host` finds (a host, or a daemon) for the enabled endpoints
+    /// `watched_hosts` would watch. A cloud machine is only reached while it
+    /// is connected, so a stopped one is never woken by a monitor.
+    fn connected_hosts<T>(&self, host: fn(&sheprd_client::ConnectTarget) -> Option<T>) -> Vec<T> {
         self.endpoints
             .iter()
             .enumerate()

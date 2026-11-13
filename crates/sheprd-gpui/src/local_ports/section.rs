@@ -22,7 +22,7 @@ pub(crate) struct Owned {
 }
 
 /// `up 5m`, `up 2h 3m`, `up 4d 1h`: the two largest units.
-pub(super) fn uptime_text(uptime: Duration) -> SharedString {
+pub(crate) fn uptime_text(uptime: Duration) -> SharedString {
     let seconds = uptime.as_secs();
     let (days, hours, minutes) = (seconds / 86_400, seconds / 3600 % 24, seconds / 60 % 60);
     match (days, hours) {
@@ -238,6 +238,23 @@ impl SheprdWindow {
                     .child(fl!("local-ports-count", count = count))
             }))
             .child(div().flex_1())
+            .when(
+                self.local_ports.any_orphaned()
+                    && !self.local_ports.acting()
+                    && !self.local_ports.pruning(),
+                |header| {
+                    header.child(
+                        self.local_ports_button(
+                            "local-ports-prune".into(),
+                            fl!("local-ports-prune").into(),
+                        )
+                        .text_color(crate::menu::danger(theme))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.stop_orphaned_servers(None, cx);
+                        })),
+                    )
+                },
+            )
             .child(self.local_ports_sort(cx))
             .when(SUPPORTED, |header| {
                 header.child(

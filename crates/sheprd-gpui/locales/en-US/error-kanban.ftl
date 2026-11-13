@@ -3,7 +3,6 @@ error-kanban-cross-lane = A card cannot move to another tracker lane.
 error-kanban-missing-approval = The move has no current native confirmation.
 error-kanban-missing-label = The workflow label must already exist.
 error-kanban-move-busy = A move is pending or the move limit is reached.
-error-kanban-move-permission = The move requires an authorized tracker account.
 error-kanban-read-only-move = Pull requests and incomplete tracker evidence cannot be moved.
 error-kanban-stale-move = The approved move changed. Prepare and confirm a new plan.
 error-kanban-unsafe-label = The workflow label identity is invalid or could remove unrelated labels.

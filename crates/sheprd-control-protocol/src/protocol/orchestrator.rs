@@ -1,4 +1,4 @@
-//! Bounded views of the prepared, read-only board. No tracker action is exposed.
+//! Bounded board reads and native dialog proposals. No tracker approval is exposed.
 
 use serde::{Deserialize, Serialize};
 
@@ -29,6 +29,12 @@ pub enum OrchestratorOp {
     BoardOrder {
         lane: String,
         before: Option<String>,
+    },
+    /// Opens native confirmation only. No wire operation can approve a move.
+    BoardMove {
+        item: String,
+        lane: String,
+        to: BoardColumn,
     },
 }
 
@@ -93,7 +99,7 @@ pub struct Card {
     pub native_state_provenance: Option<String>,
     pub label_completeness: Option<String>,
     pub warnings: Vec<String>,
-    /// False until a later delivery adds preflight and native confirmation.
+    /// A proposal can prepare native confirmation; this never proves permission.
     pub can_move: bool,
     pub read_only_reason: String,
 }

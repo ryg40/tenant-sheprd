@@ -8,6 +8,24 @@ use crate::{
     i18n::fl,
 };
 
+pub(super) fn propose(
+    item: String,
+    lane: String,
+    to: sheprd_control_protocol::BoardColumn,
+    context: &Context,
+) -> crate::Result<Output> {
+    match context.call(
+        Request::Orchestrator,
+        OrchestratorOp::BoardMove { item, lane, to },
+    )? {
+        Response::Done { message } => Ok(Output::message(message)),
+        Response::Orchestrator {
+            reply: BoardReply::Pending,
+        } => Ok(Output::data(fl!("kanban-pending"), &BoardReply::Pending)?.nothing()),
+        response => Err(unexpected(response)),
+    }
+}
+
 pub(super) fn order(
     lane: String,
     before: Option<String>,

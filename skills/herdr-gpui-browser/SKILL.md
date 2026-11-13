@@ -269,6 +269,7 @@ for what only Sheprd shows or keeps.
 | Show the read-only GitHub and Forgejo Kanban board | `sheprd ui panel kanban` |
 | Read the window's prepared board without showing it | `sheprd orchestrator board --json`, then `sheprd orchestrator board --cursor CURSOR --json` |
 | Order a known lane locally, before another or at the end; use canonical keys from board output | `sheprd orchestrator board order LANE [--before LANE] --json` |
+| Propose a Forgejo issue move with canonical board keys; opens native confirmation, never approves a tracker write | `sheprd orchestrator board move ITEM --lane LANE --to open\|in-progress\|in-review\|done --json` |
 | Diagnose missing GitHub details: last reported GraphQL quota and rate-limit retry delays | `sheprd pr quota --json` |
 | List the vulnerability reports outsiders filed and the open Dependabot alerts of your repositories, most severe first | `sheprd security --json` |
 | Show the user an alert's or a vulnerability report's page in Sheprd | `sheprd security open OWNER/NAME 42` or `... GHSA-xxxx-xxxx-xxxx` |
@@ -278,6 +279,7 @@ for what only Sheprd shows or keeps.
 | Open a dev server in a tab, forwarded when you run on an SSH host | `sheprd ports open 3000` |
 | See every port this computer listens on, with the process, directory, and workspace behind it | `sheprd ports all --json` |
 | Ask the user to stop (or pause) whatever holds a port you need | `sheprd ports stop 3000`; they confirm in the app |
+| Ask the user to stop the servers left running by closed panes | `sheprd ports prune`; they confirm in the app |
 | See the processes under a pane, with CPU and memory | `sheprd processes` |
 | Start a chat with another agent in a new tab, shown as a native chat view | `sheprd chat new claude`, then `sheprd chat` for its status |
 | Move a terminal agent into a native chat, keeping its conversation (an agent that is idle, in another pane) | `sheprd chat convert --pane ID`, then `sheprd chat` for its status |

@@ -63,7 +63,9 @@ impl Snapshot {
         for status in self.moves.iter().filter(|status| {
             !matches!(
                 status.phase,
-                moves::MovePhase::Cancelled | moves::MovePhase::Refused(_)
+                moves::MovePhase::Cancelled
+                    | moves::MovePhase::Refused(_)
+                    | moves::MovePhase::Unchanged
             )
         }) {
             records.insert(identity(&status.observed.item), status.observed.clone());

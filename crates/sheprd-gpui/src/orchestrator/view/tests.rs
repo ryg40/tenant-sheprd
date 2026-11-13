@@ -20,6 +20,7 @@ mod forgejo_account;
 mod gitlab_merge_request;
 mod groups;
 mod kanban;
+pub(super) mod kanban_moves;
 mod kanban_order;
 mod list_switch;
 mod markdown;

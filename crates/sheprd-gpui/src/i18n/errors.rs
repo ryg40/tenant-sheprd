@@ -43,6 +43,7 @@ mod notification_mutes;
 mod orchestrator;
 mod orchestrator_azure;
 mod orchestrator_forgejo;
+mod orchestrator_kanban;
 mod orchestrator_role;
 mod overview;
 mod palette;

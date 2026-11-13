@@ -140,6 +140,7 @@ impl OrchestratorView {
                 el.child(div().px_4().pb_2().child(fl!("kanban-partial")))
             })
             .child(div().px_4().pb_2().child(fl!("kanban-order-help")))
+            .child(div().px_4().pb_2().child(fl!("kanban-move-help")))
             .when(self.kanban.save_failed, |el| {
                 el.child(div().px_4().pb_2().child(fl!("kanban-order-unsaved")))
             })
@@ -168,6 +169,8 @@ impl OrchestratorView {
             );
         content
             .children(self.render_kanban_popup(window, cx))
+            .children(self.render_move_menu(window, cx))
+            .children(self.render_move_dialog(window, cx))
             .into_any_element()
     }
 
@@ -287,7 +290,7 @@ impl OrchestratorView {
                         .text_color(rgb(theme.subtext()))
                         .child(div().min_w_0().truncate().child(context)),
                 );
-                for cell in &lane.cells {
+                for (column_index, cell) in lane.cells.iter().enumerate() {
                     let mut column = div()
                         .w(px(COLUMN_WIDTH))
                         .flex_none()
@@ -318,6 +321,7 @@ impl OrchestratorView {
                                         .border_1()
                                         .border_color(rgb(theme.primary()))
                                 })
+                                .child(self.card_handle(card, cx))
                                 .child(
                                     div()
                                         .flex_none()
@@ -351,7 +355,13 @@ impl OrchestratorView {
                                 .child(fl!("kanban-cell-empty")),
                         );
                     }
-                    row = row.child(column);
+                    row = row.child(self.card_target(
+                        column,
+                        lane.key.clone(),
+                        BoardColumn::ALL[column_index],
+                        at,
+                        cx,
+                    ));
                 }
             }
         }

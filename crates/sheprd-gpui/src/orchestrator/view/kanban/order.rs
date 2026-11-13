@@ -144,6 +144,9 @@ impl OrchestratorView {
             || self.confirm.is_some()
             || self.merge_open
             || self.kanban.drag.active.is_some()
+            || self.kanban.drag.active_card.is_some()
+            || self.kanban.move_dialog.is_some()
+            || self.kanban.move_menu_open()
         {
             return Err(error::Error::Busy);
         }

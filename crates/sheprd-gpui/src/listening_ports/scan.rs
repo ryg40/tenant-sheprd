@@ -9,6 +9,7 @@
 use super::Error;
 use super::tunnel::Key;
 use crate::{Result, browser::WebUrl, usage::Host};
+use sheprd_client::shell_quote;
 use std::{collections::HashMap, net::IpAddr};
 
 /// Listener lines read from one answer; the rest are ignored.
@@ -24,15 +25,102 @@ const MAX_SOCKET: usize = 1024;
 
 /// Prints `L <pid> <address:port> <process>` per listening socket, then
 /// `E <pid> <workspace> <api socket>` for each listener started inside a
-/// Herdr pane, the socket naming which daemon's pane that was, or
-/// `N` when the host has neither `ss` nor `lsof`. Linux prefers `ss`, which
-/// is quicker; macOS has only `lsof`. Both list only this user's processes
-/// with their owners, so another user's servers never show. The step runs in
-/// a long-lived shell, so it must not `exit`, and it adds each `PATH` entry
-/// only when missing: appending on every scan grows `PATH` without bound and
-/// slows every command lookup (issue #754).
+/// Herdr pane, the socket naming which daemon's pane that was, and
+/// `P <pid> <pane>` when that daemon answers `pane_not_found` for the pane
+/// the process names, or `N` when the host has neither `ss` nor `lsof`.
+///
+/// Only the daemons [`step`] names are asked (`herdr_sockets`, this
+/// computer's API sockets; `herdr_sessions`, a remote host's session names),
+/// through the `herdr` it names (`herdr_cli`); run alone, the step asks
+/// nothing. A listener's own `HERDR_BIN_PATH` is never run. Herdr gives a
+/// pane moved to another workspace a new ID and keeps resolving the old one,
+/// so each pane is asked twice, once without pane context and once as the
+/// pane itself (`HERDR_PANE_ID`, no other variable of the listener), and is
+/// closed only when both answers exit 1 with a `pane_not_found` error. Each
+/// ask is killed after 2 s by `timeout`, else by `perl`'s `alarm` (macOS);
+/// with neither, nothing is asked. Asking stops after 6 s in all, and a
+/// socket that timed out once is not asked again in the scan, so the step
+/// ends well inside its own timeout. Nor is `P` printed for a listener that
+/// is the shell's parent (the app, on this computer) or descends from it:
+/// the app's own tunnels and helpers inherit the pane variables of the pane
+/// it was started from without being that pane's servers. Linux prefers
+/// `ss`, which is quicker; macOS has only `lsof`. Both list only this user's
+/// processes with their owners, so another user's servers never show. The
+/// step runs in a long-lived shell, so it must not `exit`, and it adds each
+/// `PATH` entry only when missing: appending on every scan grows `PATH`
+/// without bound and slows every command lookup (issue #754).
 // i18n: data
-pub(crate) const COMMAND: &str = r#"for herdr_dir in /usr/sbin /sbin; do
+pub(crate) const COMMAND: &str = r#"herdr_parent() {
+    if [ -r "/proc/$1/status" ]; then
+        sed -n 's/^PPid:[[:space:]]*//p' "/proc/$1/status"
+    else
+        ps -o ppid= -p "$1" 2>/dev/null | tr -d ' '
+    fi
+}
+herdr_ours() {
+    herdr_up=$1
+    herdr_hops=0
+    while [ "$herdr_hops" -lt 64 ] && [ -n "$herdr_up" ] && [ "$herdr_up" -gt 1 ] 2>/dev/null; do
+        [ "$herdr_up" = "$PPID" ] && return 0
+        herdr_up=$(herdr_parent "$herdr_up")
+        herdr_hops=$((herdr_hops + 1))
+    done
+    return 1
+}
+herdr_known() {
+    [ -n "$1" ] || return 1
+    case "
+$herdr_sockets
+" in
+        *"
+$1
+"*) return 0 ;;
+    esac
+    herdr_config=${XDG_CONFIG_HOME:-$HOME/.config}/herdr
+    for herdr_name in $herdr_sessions; do
+        case "$herdr_name" in
+            default) herdr_expected=$herdr_config/herdr.sock ;;
+            *) herdr_expected=$herdr_config/sessions/$herdr_name/herdr.sock ;;
+        esac
+        [ "$1" = "$herdr_expected" ] && return 0
+    done
+    return 1
+}
+herdr_bounded() {
+    case "$herdr_wait" in
+        timeout) timeout -s KILL 2 "$@" ;;
+        perl) perl -e 'alarm shift; exec @ARGV or exit 127' 2 "$@" ;;
+        *) return 127 ;;
+    esac
+}
+herdr_ask() {
+    case "$herdr_slow" in
+        *"
+$1
+"*) return 1 ;;
+    esac
+    [ $(($(date +%s) - herdr_start)) -lt 6 ] || return 1
+    if [ -n "$3" ]; then
+        herdr_answer=$(herdr_bounded env -u HERDR_TAB_ID -u HERDR_WORKSPACE_ID HERDR_PANE_ID="$3" HERDR_SOCKET_PATH="$1" "$herdr_cli" pane get "$2" 2>&1 >/dev/null </dev/null)
+    else
+        herdr_answer=$(herdr_bounded env -u HERDR_PANE_ID -u HERDR_TAB_ID -u HERDR_WORKSPACE_ID HERDR_SOCKET_PATH="$1" "$herdr_cli" pane get "$2" 2>&1 >/dev/null </dev/null)
+    fi
+    herdr_status=$?
+    if [ "$herdr_status" -eq 124 ] || [ "$herdr_status" -ge 128 ]; then
+        herdr_slow="$herdr_slow$1
+"
+        return 1
+    fi
+    [ "$herdr_status" -eq 1 ] || return 1
+    case "$herdr_answer" in
+        '{"error":{"code":"pane_not_found",'*) return 0 ;;
+    esac
+    return 1
+}
+herdr_closed() {
+    herdr_ask "$1" "$2" '' && herdr_ask "$1" "$2" "$2"
+}
+for herdr_dir in /usr/sbin /sbin; do
     case ":$PATH:" in
         *":$herdr_dir:"*) ;;
         *) PATH="$PATH:$herdr_dir" ;;
@@ -57,6 +145,22 @@ else
     herdr_ports=N
 fi
 printf '%s\n' "$herdr_ports"
+herdr_wait=
+if [ -z "${herdr_cli:-}" ]; then
+    :
+elif command -v timeout >/dev/null 2>&1; then
+    herdr_wait=timeout
+elif command -v perl >/dev/null 2>&1; then
+    herdr_wait=perl
+fi
+herdr_asked=0
+herdr_start=$(date +%s)
+herdr_slow='
+'
+herdr_gone='
+'
+herdr_live='
+'
 for herdr_pid in $(printf '%s\n' "$herdr_ports" | awk '$1 == "L" { print $2 }' | sort -un | head -n 128); do
     if [ -r "/proc/$herdr_pid/environ" ]; then
         herdr_env=$(tr '\0' '\n' < "/proc/$herdr_pid/environ")
@@ -64,12 +168,68 @@ for herdr_pid in $(printf '%s\n' "$herdr_ports" | awk '$1 == "L" { print $2 }' |
         herdr_env=$(ps -E -ww -o command= -p "$herdr_pid" 2>/dev/null | tr ' ' '\n')
     fi
     herdr_workspace=$(printf '%s\n' "$herdr_env" | sed -n 's/^HERDR_WORKSPACE_ID=//p' | head -n 1)
+    herdr_pane=$(printf '%s\n' "$herdr_env" | sed -n 's/^HERDR_PANE_ID=//p' | head -n 1)
     herdr_socket=$(printf '%s\n' "$herdr_env" | sed -n 's/^HERDR_SOCKET_PATH=//p' | head -n 1)
     if [ -n "$herdr_workspace" ]; then
         printf 'E %s %s %s\n' "$herdr_pid" "$herdr_workspace" "$herdr_socket"
+        case "$herdr_pane" in
+            ''|-*) continue ;;
+        esac
+        [ -n "$herdr_wait" ] || continue
+        herdr_known "$herdr_socket" || continue
+        herdr_key="$herdr_socket $herdr_pane"
+        case "$herdr_live" in
+            *"
+$herdr_key
+"*) continue ;;
+        esac
+        case "$herdr_gone" in
+            *"
+$herdr_key
+"*) ;;
+            *)
+                [ "$herdr_asked" -lt 32 ] || continue
+                herdr_asked=$((herdr_asked + 1))
+                if herdr_closed "$herdr_socket" "$herdr_pane"; then
+                    herdr_gone="$herdr_gone
+$herdr_key
+"
+                else
+                    herdr_live="$herdr_live
+$herdr_key
+"
+                    continue
+                fi
+                ;;
+        esac
+        herdr_ours "$herdr_pid" || printf 'P %s %s\n' "$herdr_pid" "$herdr_pane"
     fi
 done
 true"#;
+
+/// The daemons a host's scan may ask about panes: only those the window
+/// shows on that host, so no other daemon of the user is ever asked.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Asked {
+    /// API sockets of this computer's daemons.
+    pub sockets: Vec<String>,
+    /// Session names of a remote host's daemons, whose paths are the host's
+    /// own.
+    pub sessions: Vec<String>,
+}
+
+/// [`COMMAND`], asking only the daemons in `asked` through `herdr`, the
+/// program this app chose; an empty `herdr` asks nothing. Each entry is one
+/// quoted line, so a path is compared, never run or expanded.
+pub(crate) fn step(asked: &Asked, herdr: &str) -> String {
+    let lines = |items: &[String]| shell_quote(&items.join("\n"));
+    format!(
+        "herdr_cli={}\nherdr_sockets={}\nherdr_sessions={}\n{COMMAND}",
+        shell_quote(herdr),
+        lines(&asked.sockets),
+        lines(&asked.sessions)
+    )
+}
 
 /// The address a socket listens on, which decides how it can be reached.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -117,6 +277,10 @@ pub(crate) struct Port {
     pub bind: Bind,
     /// The listening process's short name, bounded display text.
     pub process: String,
+    /// The `HERDR_PANE_ID` of the pane that started it, only once its
+    /// daemon said that pane is closed; `None` when the process did not say,
+    /// the daemon did not say so, or two processes on the number disagree.
+    pub pane: Option<String>,
 }
 
 impl Port {
@@ -223,12 +387,16 @@ pub(crate) struct Scan {
     /// The pane each listening process was started in. Several processes
     /// can share a number, so only the process names a listener's owner.
     pub pids: HashMap<u32, Owner>,
+    /// The listening processes whose daemon said the pane their
+    /// environment names is closed, with that pane.
+    pub closed: HashMap<u32, String>,
 }
 
 /// Parses what [`COMMAND`] printed.
 pub(crate) fn parse(text: &str) -> Result<Scan> {
     let mut listeners: Vec<(u32, Port)> = Vec::new();
     let mut owners: HashMap<u32, Owner> = HashMap::new();
+    let mut panes: HashMap<u32, String> = HashMap::new();
     for line in text.lines() {
         let mut words = line.splitn(4, ' ');
         match words.next() {
@@ -247,17 +415,8 @@ pub(crate) fn parse(text: &str) -> Result<Scan> {
                     continue;
                 };
                 let workspace = workspace.trim_end();
-                let plain = !workspace.is_empty()
-                    && workspace.len() <= MAX_WORKSPACE_ID
-                    && workspace.chars().all(|c| c.is_ascii_graphic() && c != '=');
-                // Paths are compared, never opened; an unusable one is unknown.
-                let socket = words
-                    .next()
-                    .map(str::trim_end)
-                    .filter(|socket| {
-                        socket.len() <= MAX_SOCKET && !socket.chars().any(char::is_control)
-                    })
-                    .unwrap_or_default();
+                let plain = token(workspace);
+                let socket = words.next().map(socket).unwrap_or_default();
                 if let (Ok(pid), true) = (pid.parse(), plain) {
                     owners.insert(
                         pid,
@@ -266,6 +425,15 @@ pub(crate) fn parse(text: &str) -> Result<Scan> {
                             socket: socket.to_owned(),
                         },
                     );
+                }
+            }
+            Some("P") => {
+                let (Some(pid), Some(pane)) = (words.next(), words.next()) else {
+                    continue;
+                };
+                let pane = pane.trim_end();
+                if let (Ok(pid), true, None) = (pid.parse(), token(pane), words.next()) {
+                    panes.insert(pid, pane.to_owned());
                 }
             }
             _ => {}
@@ -277,13 +445,26 @@ pub(crate) fn parse(text: &str) -> Result<Scan> {
             continue;
         };
         scan.pids.insert(pid, owner.clone());
+        if let Some(pane) = panes.get(&pid) {
+            scan.closed.insert(pid, pane.clone());
+        }
+        let port = Port {
+            pane: panes.get(&pid).cloned(),
+            ..port
+        };
         let list = scan.ports.entry(owner.clone()).or_default();
         match list.iter_mut().find(|known| known.number == port.number) {
             // IPv4 and IPv6 sockets of one server share its number.
             Some(known) => {
+                // Processes of two panes on one number: neither pane alone
+                // says whether the port's server outlived its pane.
+                let pane = (known.pane == port.pane)
+                    .then(|| port.pane.clone())
+                    .flatten();
                 if port.bind.reach() > known.bind.reach() {
                     *known = port;
                 }
+                known.pane = pane;
             }
             None => list.push(port),
         }
@@ -293,6 +474,24 @@ pub(crate) fn parse(text: &str) -> Result<Scan> {
         list.truncate(MAX_PORTS);
     }
     Ok(scan)
+}
+
+/// A process's `HERDR_SOCKET_PATH`, or empty when it is unusable. Paths
+/// are compared, never opened.
+pub(crate) fn socket(text: &str) -> &str {
+    let text = text.trim_end();
+    if text.len() <= MAX_SOCKET && !text.chars().any(char::is_control) {
+        text
+    } else {
+        ""
+    }
+}
+
+/// A short daemon token such as a workspace ID `w7V` or a pane ID `w7V:p2`.
+pub(crate) fn token(text: &str) -> bool {
+    !text.is_empty()
+        && text.len() <= MAX_WORKSPACE_ID
+        && text.chars().all(|c| c.is_ascii_graphic() && c != '=')
 }
 
 /// `127.0.0.1:3000`, `[::1]:3000`, `*:3000`, `0.0.0.0:3000`.
@@ -310,5 +509,6 @@ pub(crate) fn listener(address: &str, process: Option<&str>) -> Option<Port> {
             .collect::<String>()
             .trim()
             .to_owned(),
+        pane: None,
     })
 }

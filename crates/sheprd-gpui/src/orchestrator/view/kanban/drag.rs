@@ -11,9 +11,19 @@ pub(in crate::orchestrator::view) struct LaneDrag {
     pub revision: u64,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::orchestrator::view) struct CardDrag {
+    pub board: EntityId,
+    pub card: CardKey,
+    pub revision: u64,
+}
+
 #[derive(Default)]
 pub(in crate::orchestrator::view) struct State {
     pub active: Option<LaneDrag>,
+    pub active_card: Option<CardDrag>,
+    card_target: Option<(LaneKey, sheprd_control_protocol::BoardColumn)>,
+    card_wash: motion::Toggle,
     gaps: HashMap<Option<LaneKey>, motion::Toggle>,
     pending: Option<LaneKey>,
     placements: Vec<(LaneKey, motion::Toggle)>,
@@ -23,6 +33,8 @@ pub(in crate::orchestrator::view) struct State {
 impl State {
     pub fn cancel(&mut self) {
         self.active = None;
+        self.active_card = None;
+        self.card_wash.set(false, motion::now(), false);
         // A committed drop still uses the old rows until preparation installs it.
         if self.pending.is_some() {
             return;
@@ -251,11 +263,136 @@ impl OrchestratorView {
         div().w_full().child(row).into_any_element()
     }
 
+    pub(super) fn card_handle(&self, card: &rows::Card, cx: &mut Context<Self>) -> AnyElement {
+        let drag = CardDrag {
+            board: cx.entity_id(),
+            card: card.domain.key.clone(),
+            revision: self.kanban.revision,
+        };
+        let view = cx.entity();
+        let look = self.look.clone();
+        let title = card.name.clone();
+        let handle = div()
+            .id(SharedString::from(format!("move-{}", card.summary.key)))
+            .role(Role::Button)
+            .aria_label(fl!("kanban-move-menu"))
+            .w(px(18.))
+            .h_full()
+            .flex_none()
+            .flex()
+            .items_center()
+            .child(
+                self.look
+                    .icon("icons/kanban.svg", 12., self.look.theme.muted),
+            );
+        if !card.summary.can_move {
+            return handle.into_any_element();
+        }
+        handle
+            .cursor(CursorStyle::OpenHand)
+            .on_drag(drag, move |drag, _, window, cx| {
+                view.update(cx, |this, cx| {
+                    this.kanban.drag.cancel();
+                    this.kanban.drag.active_card = Some(drag.clone());
+                    this.kanban.selected = Some(drag.card.clone());
+                    window.focus(&this.focus, cx);
+                    cx.notify();
+                });
+                cx.new(|_| Preview {
+                    look: look.clone(),
+                    title: title.clone(),
+                })
+            })
+            .into_any_element()
+    }
+
+    pub(in crate::orchestrator::view) fn validate_card_drag(
+        &self,
+        drag: &CardDrag,
+        board: EntityId,
+        lane: &LaneKey,
+    ) -> Result<(), error::Error> {
+        if drag.board != board || drag.revision != self.kanban.revision {
+            return Err(sheprd_orchestrator::kanban::Error::StaleMove.into());
+        }
+        if &drag.card.lane != lane {
+            return Err(sheprd_orchestrator::kanban::Error::CrossLane.into());
+        }
+        if self.kanban.drag.active_card.as_ref() != Some(drag) {
+            return Err(sheprd_orchestrator::kanban::Error::StaleMove.into());
+        }
+        Ok(())
+    }
+
+    pub(super) fn card_target(
+        &self,
+        cell: Div,
+        lane: LaneKey,
+        column: sheprd_control_protocol::BoardColumn,
+        row: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let target = (lane.clone(), column);
+        let wash = &self.kanban.drag.card_wash;
+        let amount = if self.kanban.drag.card_target.as_ref() == Some(&target) {
+            wash.shown(motion::now())
+        } else {
+            0.
+        };
+        let moving = wash.moving(motion::now());
+        let hover_lane = lane.clone();
+        cell.bg(rgb(self.look.theme.primary_wash()).opacity(amount))
+            .when(moving, |el| {
+                el.on_children_prepainted(|_, window, _| window.request_animation_frame())
+            })
+            .id((
+                SharedString::from(format!("card-target-{}-{column:?}", lane.canonical())),
+                row,
+            ))
+            // Accept typed dispatch so invalid drops can report a visible refusal.
+            .can_drop(|value, _, _| value.is::<CardDrag>())
+            .on_drag_move(
+                cx.listener(move |this, event: &DragMoveEvent<CardDrag>, _, cx| {
+                    if event.bounds.contains(&event.event.position) {
+                        let valid = this
+                            .validate_card_drag(event.drag(cx), cx.entity_id(), &hover_lane)
+                            .is_ok();
+                        this.kanban.drag.card_target = Some((hover_lane.clone(), column));
+                        this.kanban.drag.card_wash.set(valid, motion::now(), false);
+                        cx.notify();
+                    }
+                }),
+            )
+            .on_drop(cx.listener(move |this, drag: &CardDrag, window, cx| {
+                let result = this.drop_card(drag, &lane, column, window, cx);
+                this.kanban.drag.cancel();
+                if let Err(error) = result {
+                    this.kanban.error = Some(error);
+                }
+                cx.notify();
+            }))
+            .into_any_element()
+    }
+
+    pub(in crate::orchestrator::view) fn drop_card(
+        &mut self,
+        drag: &CardDrag,
+        lane: &LaneKey,
+        column: sheprd_control_protocol::BoardColumn,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<(), error::Error> {
+        self.validate_card_drag(drag, cx.entity_id(), lane)?;
+        self.propose_card(&drag.card.item.canonical(), lane, column, window, cx)
+    }
+
     pub(super) fn lane_drag_frame(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if !cx.has_active_drag() && self.kanban.drag.active.is_some() {
+        if !cx.has_active_drag()
+            && (self.kanban.drag.active.is_some() || self.kanban.drag.active_card.is_some())
+        {
             self.kanban.drag.cancel();
         }
-        if self.kanban.drag.active.is_none() {
+        if self.kanban.drag.active.is_none() && self.kanban.drag.active_card.is_none() {
             return;
         }
         let handle = self.kanban.scroll.0.borrow().base_handle.clone();

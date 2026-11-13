@@ -33,14 +33,10 @@ fn missing_cancelled_and_reused_approval_never_writes_across_windows() {
             .configure(proposal.card.lane.clone(), fresh.context.clone())
             .unwrap();
     }
-    assert!(matches!(
-        first.confirm(&proposal.card),
-        Err(Error::Kanban(kanban::Error::MissingApproval))
-    ));
     let (send, recv) = mpsc::sync_channel(1);
     let (started, starting) = mpsc::sync_channel(1);
     let pending = fresh.clone();
-    first
+    let ticket = first
         .prepare(
             proposal.clone(),
             Record {
@@ -69,11 +65,11 @@ fn missing_cancelled_and_reused_approval_never_writes_across_windows() {
     first.cancel(&proposal.card);
     send.send(()).unwrap();
     assert!(matches!(
-        first.confirm(&proposal.card),
+        first.confirm(ticket),
         Err(Error::Kanban(kanban::Error::MissingApproval))
     ));
     let pending = fresh.clone();
-    second
+    let ticket = second
         .prepare(
             proposal.clone(),
             Record {
@@ -86,11 +82,7 @@ fn missing_cancelled_and_reused_approval_never_writes_across_windows() {
     settled(&second, &proposal.card, |phase| {
         matches!(phase, MovePhase::AwaitingConfirmation(_))
     });
-    let approval = second.confirm(&proposal.card).unwrap();
-    assert!(matches!(
-        second.confirm(&proposal.card),
-        Err(Error::Kanban(kanban::Error::MissingApproval))
-    ));
+    let approval = second.confirm(ticket).unwrap();
     second.cancel(&proposal.card);
     assert!(matches!(
         second.submit(
@@ -116,13 +108,13 @@ fn old_sync_and_result_cannot_overwrite_a_new_source_or_same_number_card() {
         facts: fresh.facts.clone(),
     };
     let pending = fresh.clone();
-    moves
+    let ticket = moves
         .prepare(proposal.clone(), original.clone(), move |_| Ok(pending))
         .unwrap();
     settled(&moves, &proposal.card, |phase| {
         matches!(phase, MovePhase::AwaitingConfirmation(_))
     });
-    let approval = moves.confirm(&proposal.card).unwrap();
+    let approval = moves.confirm(ticket).unwrap();
     let tracker = Arc::new(Mutex::new(fresh.clone()));
     let read = tracker.clone();
     let write = tracker.clone();
@@ -170,7 +162,7 @@ fn old_sync_and_result_cannot_overwrite_a_new_source_or_same_number_card() {
     let mut proposal_back = proposal.clone();
     proposal_back.destination = kanban::BoardColumn::Open;
     let pending = tracker.lock().unwrap().clone();
-    moves
+    let ticket = moves
         .prepare(proposal_back, completed.observed.clone(), move |_| {
             Ok(pending)
         })
@@ -178,7 +170,7 @@ fn old_sync_and_result_cannot_overwrite_a_new_source_or_same_number_card() {
     settled(&moves, &proposal.card, |phase| {
         matches!(phase, MovePhase::AwaitingConfirmation(_))
     });
-    let approval = moves.confirm(&proposal.card).unwrap();
+    let approval = moves.confirm(ticket).unwrap();
     let (started, starting) = mpsc::sync_channel(1);
     let (resume, resumed) = mpsc::sync_channel(1);
     let read = tracker.clone();

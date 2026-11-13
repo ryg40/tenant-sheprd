@@ -777,6 +777,10 @@ impl SheprdWindow {
         if self.update_local_ports() {
             cx.notify();
         }
+        if self.update_orphans() {
+            cx.notify();
+        }
+        self.answer_prune(window, cx);
         if self.update_walkr(cx) {
             cx.notify();
         }

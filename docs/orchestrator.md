@@ -198,14 +198,20 @@ Mutations leave unrelated labels and all other issue fields unchanged.
 Changed label membership invalidates approval; label order does not.
 GitHub plans bind `github.com` cards to `https://api.github.com/graphql`.
 Forgejo plans require the API authority to match the card's tracker authority.
+They also freeze the repository and issue database IDs, not just the reusable path and issue number.
+Preparation requires both IDs; revalidation and final observation must match them.
+When the issue names its repository, its ID and full name must agree too.
 
-`ConfirmedMove` has private fields and cannot be cloned or deserialized.
-This part has no production constructor, provider writer, or move wire request.
-Its consuming submit method checks lifecycle admission before executing; there is no separate public executor.
-The module keeps the gate permit until it publishes the result.
-A later native dialog supplies the production confirmation constructor.
+`ConfirmedMove` has private fields and cannot be cloned or serialized.
+Only preparation returns a `MoveTicket`, once per operation. Its fields are private and it has no Clone, Copy, Default, or serde implementation.
+The native dialog alone stores that ticket. Its Move ticket handler consumes it through the backend's public `Moves::confirm` method.
+The backend checks the card, current operation, cancellation and awaiting-confirmation phase before constructing `ConfirmedMove`.
+Dropping an unused ticket cancels its own unconfirmed operation. An old ticket cannot approve a replacement plan.
+The consuming submit method checks lifecycle admission before executing and retains the gate permit until publication.
 The CLI and drag payloads cannot carry approval, `yes`, or `force`.
-Control protocol version remains 21.
+Control protocol version 23 adds `orchestrator board move ITEM --lane LANE --to COLUMN`, which only opens native confirmation.
+Drag a Forgejo issue within its lane or press M on a selected card for the same dialog.
+Cancel, Escape, and closing an unconfirmed dialog send no mutation. GitHub and PR cards remain unavailable.
 
 `service/kanban/moves.rs` uses the existing short-lived action threads and shared worker action limit.
 One bounded app-wide `MoveGate` excludes concurrent operations on the same tracker card across windows.
@@ -232,7 +238,48 @@ Missing rows do not prove closure. Current active readers without complete label
 A later tracker observation can replace a retained item without replacing the recorded action outcome.
 Source replacement discards unconfirmed plans and fences results from already accepted threads.
 Provider adapters and the dialog must configure contexts before admitting moves.
-Forgejo account workers share these lifecycle hooks but still expose no production write path.
+Forgejo account workers share these lifecycle hooks and the narrow issue-move adapter.
+Their cached rows still grant no checkout or tracker permissions.
+
+### Forgejo issue adapter
+
+`forgejo/moves.rs` freezes one credential, instance root, card, and authenticated account before planning.
+`Moves::prepare_forgejo` performs read-only preflight through bounded action admission.
+`Moves::prepare_forgejo_dialog` resolves credentials and retains the connected session on bounded action threads.
+`Moves::submit_forgejo_dialog` consumes `ConfirmedMove` with that retained session; it cannot switch credentials or routes.
+Preflight and revalidation read the authenticated user, repository permissions, exact issue, and complete issue labels.
+Account-only routes also require membership in the account's freshly paged repository listing.
+Repository and organization label definitions resolve configured names to existing IDs.
+Ambiguous IDs, missing required labels, exclusive labels, and incomplete evidence refuse without writing.
+Each listing is bounded by the existing 2,000-record and 100-page limits, with duplicate and total checks.
+
+The adapter sends only per-label DELETE, approved-ID POST, and a final state-only PATCH.
+It never replaces all labels or changes an unrelated issue field.
+HTTPS and the exact instance prefix are required; redirects are refused.
+A folder in `FORGEJO_HOST` must match that prefix. Account-only routes still require a root-host instance.
+The sensitive token header stays on the approved authority and never enters errors or stored state.
+A process-keyed credential fingerprint binds approval without storing token bytes in the plan.
+Resolving the same credential again does not invalidate another pending card in that lane.
+
+The token requires `write:issue`, `read:repository`, `read:user`, and `read:organization`.
+Issue write scope includes issue reads; authenticated identity needs user read scope.
+Account repository listing needs both user and repository read scopes.
+The adapter reads organization labels for every owner, including personal owners; organization read scope is therefore always required.
+Repository push or admin rights are a conservative preflight requirement, not proof of token scope.
+An issue-only team role without those rights refuses before any write.
+Forgejo/Gitea provide no current-token scope introspection in the inspected API contract.
+`kanban::Error::MovePermission` retains the failed step, HTTP status when available, and the step's required scope.
+It retains no token, header, or response body.
+The diagnostic calls the cause unproved: a denied request alone does not distinguish a missing scope from other access failures.
+The native dialog displays the typed step, required scope, HTTP status when available, and the unproved-cause warning.
+No no-op mutation probes scope, and no alternate account bypasses denial.
+The owner must grant the token's scopes before enabling moves; this implementation never changes credentials.
+
+After the first failed or ambiguous mutation, execution stops and reads the exact issue and its labels again.
+This final observation rechecks repository and issue database identity without requiring write permission, account listing, or unchanged label definitions.
+Partial results retain accepted deltas and unrelated labels; lost responses remain unknown and never replay.
+Gitea uses this same tested API contract; unsupported or incomplete responses refuse conservatively.
+The API still has a final read/write race and supplies no transaction or compare-and-swap guarantee.
 
 ## Bounded Done history
 
@@ -575,7 +622,8 @@ token is sent only over HTTPS: to an `http://` remote it is withheld and the
 read is anonymous. A token needs the `read:issue` and `read:repository`
 scopes. The login shell is read once per run, so changing either variable
 takes a restart. The header is marked sensitive and requests follow no
-redirect, so the token is never logged, shown, or carried to another address.
+redirect, so the token is not shown or carried to another address.
+The token never reaches the app's log because no `log` logger is installed and the log keeps only Sheprd crates.
 
 **Limits.** Pages of 50, Forgejo's default `MAX_RESPONSE_ITEMS`, read until a
 short one; a short page whose `X-Total-Count` says more are open reads on,

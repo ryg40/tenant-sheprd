@@ -20,6 +20,7 @@ mod combined_changes;
 mod forgejo;
 mod forgejo_account;
 mod forgejo_kanban_history;
+pub(crate) mod forgejo_kanban_moves;
 mod forgejo_nodes;
 mod forgejo_remote;
 mod forgejo_search;

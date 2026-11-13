@@ -7,9 +7,11 @@
 //! by the host (`Repository::ForgejoAccount`) in the same state directory:
 //! a restart shows the last complete listing at once, and `sheprd
 //! orchestrator issues --forgejo HOST` reads it. A capped listing is shown
-//! and not written. It finds no repository, reads no branches, and takes no
-//! actions, so its snapshot grants no access to act with. Without a token
-//! for the host it reads nothing and stores nothing.
+//! and not written. It reads no branches and refuses checkout actions. The
+//! shared move lifecycle accepts only the narrow Forgejo issue adapter, whose
+//! preflight checks the current repository listing and access independently.
+//! Cached rows grant no tracker permission. Without a token it reads nothing
+//! and stores nothing.
 
 use super::{
     COMMANDS, Command, Error, Notice, RemoteRequest, Result, Service, Snapshot, SyncState, Timing,
@@ -123,14 +125,7 @@ impl AccountWorker {
                     self.sync();
                     last_sync = Instant::now();
                 }
-                Ok(Command::Act(_)) => push(
-                    &self.notices,
-                    Notice {
-                        outcome: Err(Arc::new(Error::Forgejo(forgejo::Error::NoCheckout {
-                            host: self.host.clone(),
-                        }))),
-                    },
-                ),
+                Ok(Command::Act(action)) => self.act(action),
                 // Forgejo keeps no pasted token, and nothing here has a
                 // GitHub pull request, agents, or actions.
                 Ok(
@@ -156,6 +151,17 @@ impl AccountWorker {
                 self.publish();
             }
         }
+    }
+
+    fn act(&self, _action: crate::actions::Action) {
+        push(
+            &self.notices,
+            Notice {
+                outcome: Err(Arc::new(Error::Forgejo(forgejo::Error::NoCheckout {
+                    host: self.host.clone(),
+                }))),
+            },
+        );
     }
 
     fn publish(&self) {

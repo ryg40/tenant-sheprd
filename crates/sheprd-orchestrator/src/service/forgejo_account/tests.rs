@@ -5,6 +5,7 @@ use super::*;
 use crate::{Checkpoint, Item, ItemKey, Provider, RemoteScope, SourceKey};
 
 mod kanban_history;
+mod kanban_moves;
 
 const HOST: &str = "forgejo.example.test";
 

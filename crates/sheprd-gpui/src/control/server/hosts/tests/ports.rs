@@ -12,6 +12,7 @@ fn port(number: u16, bind: Bind) -> Port {
         number,
         bind,
         process: "node".into(),
+        pane: None,
     }
 }
 

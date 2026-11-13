@@ -39,7 +39,9 @@ pub enum Placement {
 /// 19: `ui` `panel` `kanban` and revision-fenced `orchestrator` `board` reads.
 /// 20: `orchestrator` `board order` changes local lane preferences only.
 /// 21: `orchestrator` `board` includes per-lane Done history coverage.
-pub const PROTOCOL_VERSION: u32 = 21;
+/// 22: `ports prune` asks to stop the servers whose panes are closed.
+/// 23: `orchestrator` `board move` opens native confirmation, never approves it.
+pub const PROTOCOL_VERSION: u32 = 23;
 
 /// Older apps and clients know only tabs, so a tab is left off the wire.
 fn is_tab(placement: &Placement) -> bool {

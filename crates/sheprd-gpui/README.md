@@ -1281,6 +1281,27 @@ local port is free. Windows clients
 do not scan this machine. Set top-level `show_listening_ports = false`, or
 turn off **Show listening ports** in Settings, to hide them and stop scanning.
 
+A port whose server outlived its pane is drawn dimmed, and its tooltip says
+the pane is closed. The scan asks the pane's own daemon (`herdr pane get`
+with the process's `HERDR_PANE_ID`), only when that daemon is one this
+window shows, through the `herdr` this app starts its daemon with (the
+host's own on its `PATH` over SSH), never one a process names. It asks
+twice, without pane context and as the pane itself, and only two
+`pane_not_found` answers count, so a pane moved to another workspace, whose
+old ID Herdr still resolves, keeps its servers live (proven on Herdr
+0.9.5). Each ask is killed after 2 seconds (`timeout`, else `perl` on
+macOS; with neither, nothing is asked), asking stops after 6 seconds per
+scan, and a daemon that timed out is not asked again in that scan. The
+daemon must also be connected in this window with a current, complete
+snapshot that lacks the pane, and the process must not be this app or one
+of its children (an SSH tunnel of an app started from a pane inherits that
+pane's variables). A host whose shell finds no `herdr` marks nothing, and
+with `show_listening_ports` off nothing is marked and `sheprd ports prune`
+says the check is off. On this computer, **Stop orphaned servers…** in the Ports
+section, or in a workspace row's context menu when the row has such ports,
+asks once to stop them all (`sheprd ports prune` opens the same dialog);
+remote ports are only marked.
+
 Set top-level `show_network_quality = true` to show latency and packet loss
 from this machine in the status bar, after CPU and memory: `NET 31ms 0%`.
 A worker thread times one TCP connect to `1.1.1.1:443` every 15 seconds, in
@@ -2510,7 +2531,11 @@ window at once, and `sheprd ui panel NAME` shows a section.
   A save failure shows an unsaved notice without undoing the local order, including automatic lane additions and removals.
   If initial preferences cannot be read, this run keeps their bytes unchanged; repair the file and restart to resume saving.
   Saved order applies before display caps. Pending or failed host discovery cannot remove saved lanes.
-  Card moves remain unavailable. Done includes Forgejo's recent settled history and GitHub's already loaded settled PRs.
+  Drag a Forgejo issue within its lane, or select it and press M for Move to, to open native confirmation.
+  Only Move ticket approves the exact label and native-state changes. Cancel and Escape send no mutation.
+  GitHub and pull request cards remain unavailable for moves. Cross-lane transfers refuse.
+  Cards stay at their last observed position while writing; partial and unknown outcomes never imply success.
+  Done includes Forgejo's recent settled history and GitHub's already loaded settled PRs.
   Each lane shows its history coverage, including cached samples, caps, and failed reads.
   Samples contain at most 100 records per repository updated within 30 days, not all closures in that period.
   Forgejo account reads cap the whole account at 200; lane hints report that shared limit.
@@ -2521,8 +2546,10 @@ window at once, and `sheprd ui panel NAME` shows a section.
   whoever started it: the app or script behind it (`vite`, `next dev`,
   `manage.py runserver`), its project, CPU and memory, uptime, and the
   workspace that started it, with Open, Pause, Resume, and Stop (Pause and
-  Stop ask first). The operating system's own listeners sit apart under
-  System. The icon counts your servers; `[sidebar] ports_count = false`
+  Stop ask first). A server whose Herdr pane is closed is dimmed with a
+  "Pane closed" tag, and **Stop orphaned servers…** asks once to stop all of
+  them (see the listening ports above). The operating system's own
+  listeners sit apart under System. The icon counts your servers; `[sidebar] ports_count = false`
   (**Settings > Sidebar**) turns the count off and with it the scan every 30
   seconds that keeps it current while the section is closed. macOS and Linux
   only.
@@ -2559,7 +2586,18 @@ Use `sheprd config get|set|unset|check`. Setting `kanban.sources` replaces the c
 Invalid mappings never reach the overrides file. Dotted keys change scalar defaults, not array entries.
 `sheprd orchestrator board --json` reads bounded, revision-fenced pages without showing the section.
 `sheprd orchestrator board order LANE [--before LANE]` changes only local lane order.
+`sheprd orchestrator board move ITEM --lane LANE --to COLUMN` opens the same native confirmation.
+The command cannot confirm or bypass tracker permissions.
 Use canonical lane keys from the board output. Omit `--before` to move a lane to the end.
+
+Forgejo issue moves require confirmation in the native Move ticket dialog; drag, menu choices, and CLI requests only open that dialog.
+A drag or command cannot approve a tracker write. PR cards remain read-only.
+The writer uses existing workflow-label IDs and state-only updates, preserving unrelated labels and fields.
+Account-only moves require fresh repository membership and access; checkout actions remain unavailable there.
+Missing credentials or permission refuse. Partial or unknown writes are read back without replay or rollback.
+The token requires `write:issue`, existing issue/repository reads, and `read:user` for account identity.
+Inherited organization labels also require `read:organization` where the server enforces that scope.
+Only HTTPS routes are eligible. The owner changes credentials; Sheprd never grants itself permission.
 
 ## Orchestrator
 

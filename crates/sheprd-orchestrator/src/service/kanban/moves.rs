@@ -1,5 +1,4 @@
 //! Bounded move lifecycle, shared action admission, and retained observations.
-//! Provider adapters and the native confirmation entry point are not enabled yet.
 
 use std::{
     collections::HashMap,
@@ -40,6 +39,7 @@ pub enum MovePhase {
     Finished(Arc<Completion>),
     Refused(Arc<crate::Error>),
     Cancelled,
+    Unchanged,
 }
 
 #[derive(Clone, Debug)]
@@ -52,9 +52,40 @@ pub struct MoveStatus {
     pub source_generation: Uuid,
 }
 
+/// Preparation-issued authority. Dropping it cancels only its own unconfirmed operation.
+#[must_use]
+pub struct MoveTicket {
+    armed: bool,
+    card: CardKey,
+    moves: Moves,
+    operation: Uuid,
+}
+
+impl MoveTicket {
+    pub fn operation(&self) -> Uuid {
+        self.operation
+    }
+}
+
+impl Drop for MoveTicket {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        if let Ok(mut state) = self.moves.state.lock()
+            && let Some(entry) = state.entries.get_mut(&self.card)
+            && entry.status.operation == self.operation
+        {
+            cancel_entry(entry);
+            self.moves.changed.store(true, Ordering::Release);
+        }
+    }
+}
+
 struct Entry {
     cancelled: Arc<AtomicBool>,
     permit: Option<MovePermit>,
+    session: Option<crate::forgejo::moves::Session>,
     status: MoveStatus,
     terminal_at: Option<Instant>,
 }
@@ -85,6 +116,7 @@ pub struct Moves {
     actions: Arc<AtomicUsize>,
     changed: Arc<AtomicBool>,
     gate: Arc<MoveGate>,
+    generation: Uuid,
     state: Arc<Mutex<State>>,
 }
 
@@ -94,8 +126,13 @@ impl Moves {
             actions,
             changed: Arc::default(),
             gate,
+            generation: Uuid::new_v4(),
             state: Arc::default(),
         }
+    }
+
+    pub fn generation(&self) -> Uuid {
+        self.generation
     }
 
     pub(in crate::service) fn take_changed(&self) -> bool {
@@ -136,6 +173,25 @@ impl Moves {
             },
         );
         Ok(())
+    }
+
+    pub(in crate::service) fn configure_dialog(
+        &self,
+        lane: LaneKey,
+        context: Context,
+    ) -> Result<()> {
+        {
+            let state = self.state.lock().map_err(|_| kanban::Error::MoveBusy)?;
+            if let Some(source) = state.sources.get(&lane) {
+                let mut provisional = source.context.clone();
+                provisional.account.clear();
+                provisional.account_generation = 0;
+                if provisional == context {
+                    return Ok(());
+                }
+            }
+        }
+        self.configure(lane, context)
     }
 
     pub fn clear(&self) {
@@ -187,7 +243,20 @@ impl Moves {
         proposal: Proposal,
         observed: Record,
         read: impl FnOnce(&AtomicBool) -> Result<Fresh> + Send + 'static,
-    ) -> Result<Uuid> {
+    ) -> Result<MoveTicket> {
+        self.prepare_session(proposal, observed, move |cancelled| {
+            read(cancelled).map(|fresh| (fresh, None))
+        })
+    }
+
+    pub(in crate::service) fn prepare_session(
+        &self,
+        proposal: Proposal,
+        observed: Record,
+        read: impl FnOnce(&AtomicBool) -> Result<(Fresh, Option<crate::forgejo::moves::Session>)>
+        + Send
+        + 'static,
+    ) -> Result<MoveTicket> {
         if proposal.card.lane != proposal.destination_lane {
             return Err(kanban::Error::CrossLane.into());
         }
@@ -228,6 +297,7 @@ impl Moves {
             Entry {
                 cancelled: cancelled.clone(),
                 permit: Some(permit),
+                session: None,
                 status: MoveStatus {
                     card: card.clone(),
                     destination: proposal.destination,
@@ -247,11 +317,18 @@ impl Moves {
             let result = if cancelled.load(Ordering::Acquire) {
                 Err(crate::Error::Cancelled)
             } else {
-                read(&cancelled).and_then(|fresh| {
-                    if fresh.context != context {
+                read(&cancelled).and_then(|(fresh, session)| {
+                    let mut expected = context.clone();
+                    if session.is_some() {
+                        expected.account = fresh.context.account.clone();
+                        expected.account_generation = fresh.context.account_generation;
+                    }
+                    if fresh.context != expected {
                         return Err(kanban::Error::StaleMove.into());
                     }
-                    MovePlan::prepare(proposal, fresh).map_err(Into::into)
+                    MovePlan::prepare(proposal, fresh)
+                        .map(|plan| (plan, session))
+                        .map_err(Into::into)
                 })
             };
             moves.prepared(&prepared_card, operation, result);
@@ -259,10 +336,20 @@ impl Moves {
         if let Err(error) = spawned {
             self.prepared(&card, operation, Err(crate::Error::Worker(error)));
         }
-        Ok(operation)
+        Ok(MoveTicket {
+            armed: true,
+            card,
+            moves: self.clone(),
+            operation,
+        })
     }
 
-    fn prepared(&self, card: &CardKey, operation: Uuid, result: Result<Option<MovePlan>>) {
+    fn prepared(
+        &self,
+        card: &CardKey,
+        operation: Uuid,
+        result: Result<(Option<MovePlan>, Option<crate::forgejo::moves::Session>)>,
+    ) {
         let Ok(mut state) = self.state.lock() else {
             return;
         };
@@ -277,15 +364,28 @@ impl Moves {
             entry.terminal_at = Some(Instant::now());
             return;
         }
+        if let Ok((Some(plan), Some(_))) = &result
+            && let Some(source) = state.sources.get_mut(&card.lane)
+        {
+            source.context = plan.context().clone();
+        }
+        let Some(entry) = state.entries.get_mut(card) else {
+            return;
+        };
+        if entry.cancelled.load(Ordering::Acquire) {
+            entry.terminal_at = Some(Instant::now());
+            return;
+        }
         self.changed.store(true, Ordering::Release);
         match result {
-            Ok(Some(mut plan)) => {
+            Ok((Some(mut plan), session)) => {
                 plan.set_operation(operation);
+                entry.session = session;
                 entry.status.observed = plan.original();
                 entry.status.phase = MovePhase::AwaitingConfirmation(Arc::new(plan));
             }
-            Ok(None) => {
-                entry.status.phase = MovePhase::Cancelled;
+            Ok((None, _)) => {
+                entry.status.phase = MovePhase::Unchanged;
                 entry.permit = None;
                 entry.terminal_at = Some(Instant::now());
             }
@@ -297,19 +397,51 @@ impl Moves {
         }
     }
 
-    // Part 8 replaces this test-only entry point with the native dialog path.
-    #[cfg(test)]
-    pub(crate) fn confirm(&self, card: &CardKey) -> Result<ConfirmedMove> {
+    /// The native dialog consumes the preparation-issued ticket exactly once.
+    pub fn confirm(&self, mut ticket: MoveTicket) -> Result<ConfirmedMove> {
+        if !Arc::ptr_eq(&self.state, &ticket.moves.state) {
+            return Err(kanban::Error::MissingApproval.into());
+        }
         let mut state = self.state.lock().map_err(|_| kanban::Error::MoveBusy)?;
+        let context = state
+            .sources
+            .get(&ticket.card.lane)
+            .ok_or(kanban::Error::StaleMove)?
+            .context
+            .clone();
         let entry = state
             .entries
-            .get_mut(card)
+            .get_mut(&ticket.card)
+            .filter(|entry| {
+                entry.status.operation == ticket.operation
+                    && !entry.cancelled.load(Ordering::Acquire)
+            })
             .ok_or(kanban::Error::MissingApproval)?;
         let MovePhase::AwaitingConfirmation(plan) = &entry.status.phase else {
             return Err(kanban::Error::MissingApproval.into());
         };
+        if plan.context() != &context {
+            return Err(kanban::Error::StaleMove.into());
+        }
         let permit = entry.permit.take().ok_or(kanban::Error::MissingApproval)?;
-        Ok(ConfirmedMove::from_dialog(plan.clone(), permit))
+        let approved = ConfirmedMove::approved(plan.clone(), permit);
+        // Keep the entry awaiting submission while disarming this ticket's Drop.
+        drop(state);
+        ticket.armed = false;
+        Ok(approved)
+    }
+
+    pub(in crate::service) fn take_session(
+        &self,
+        plan: &MovePlan,
+    ) -> Result<crate::forgejo::moves::Session> {
+        let mut state = self.state.lock().map_err(|_| kanban::Error::MoveBusy)?;
+        state
+            .entries
+            .get_mut(plan.card())
+            .filter(|entry| entry.status.operation == plan.operation())
+            .and_then(|entry| entry.session.take())
+            .ok_or_else(|| kanban::Error::MissingApproval.into())
     }
 
     /// Consume approval once. Callback ownership freezes routing for the accepted thread.
@@ -534,6 +666,7 @@ fn cancel_entry(entry: &mut Entry) {
         }
         entry.cancelled.store(true, Ordering::Release);
         entry.permit = None;
+        entry.session = None;
         entry.status.phase = MovePhase::Cancelled;
     }
 }

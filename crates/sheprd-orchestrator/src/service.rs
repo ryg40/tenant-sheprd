@@ -42,7 +42,7 @@ mod run;
 mod schedule;
 mod sources;
 
-pub use kanban::moves::{MovePhase, MoveStatus, Moves, ReadFence};
+pub use kanban::moves::{MovePhase, MoveStatus, MoveTicket, Moves, ReadFence};
 pub use remote::{RemoteRequest, RemoteScope};
 pub use sources::sources;
 
@@ -367,7 +367,7 @@ impl Service {
         Some(snapshot)
     }
 
-    /// Move state for future provider and native dialog adapters. No writer is enabled.
+    /// Bounded move preparation, native confirmation, and retained observations.
     pub fn moves(&self) -> &Moves {
         &self.moves
     }

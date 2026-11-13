@@ -4,7 +4,7 @@
 //! rather than overflow a narrow window.
 // i18n: migrated
 
-use super::{Listener, Pending, home_relative, section::uptime_text};
+use super::{Batch, Listener, Pending, home_relative, section::uptime_text};
 use crate::{
     SheprdWindow,
     config::corners,
@@ -16,6 +16,9 @@ use gpui::{prelude::*, *};
 use sheprd_control_protocol::protocol::hosts::PortAction;
 use std::{path::Path, time::SystemTime};
 
+/// How faint a row whose server outlived its pane is drawn.
+const ORPHANED_OPACITY: f32 = 0.6;
+
 impl SheprdWindow {
     pub(super) fn local_port_row(
         &self,
@@ -26,8 +29,10 @@ impl SheprdWindow {
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
         let theme = &self.theme;
+        let (foreground, surface) = (theme.foreground, theme.surface);
         let small = px(self.config.ui.size - 1.);
         let owner = self.local_port_owner(listener.identity.pid);
+        let orphaned = self.local_ports.orphaned(listener.identity);
         let pill = |text: SharedString, color: u32| {
             div()
                 .flex_none()
@@ -69,6 +74,7 @@ impl SheprdWindow {
             .gap_3()
             .rounded(px(corners::PANEL))
             .bg(rgb(theme.surface))
+            .when(orphaned, |row| row.opacity(ORPHANED_OPACITY))
             .child(
                 div()
                     .flex_none()
@@ -131,7 +137,21 @@ impl SheprdWindow {
                                         .into(),
                                     theme.subtext(),
                                 )
-                            })),
+                            }))
+                            .when(orphaned, |line| {
+                                line.child(
+                                    pill(fl!("local-ports-orphaned").into(), theme.subtext())
+                                        .id(("local-port-orphaned", index))
+                                        .tooltip(move |_, cx| {
+                                            cx.new(|_| crate::usage::Hint {
+                                                text: fl!("listening-ports-orphaned").into(),
+                                                foreground,
+                                                surface,
+                                            })
+                                            .into()
+                                        }),
+                                )
+                            }),
                     )
                     .child(
                         div()
@@ -210,6 +230,7 @@ impl SheprdWindow {
                     this.ask_to_signal_ports(
                         Pending {
                             action: PortAction::Pause,
+                            batch: Batch::Chosen,
                             listeners: vec![chosen.clone()],
                         },
                         window,
@@ -226,6 +247,7 @@ impl SheprdWindow {
                     this.ask_to_signal_ports(
                         Pending {
                             action: PortAction::Stop,
+                            batch: Batch::Chosen,
                             listeners: vec![chosen.clone()],
                         },
                         window,

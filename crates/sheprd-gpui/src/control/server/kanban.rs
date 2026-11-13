@@ -12,7 +12,7 @@ use gpui::App;
 pub(super) fn serve(call: Call<OrchestratorOp>, cx: &mut App) -> Response {
     let cursor = match &call.op {
         OrchestratorOp::Board { cursor } => cursor.clone(),
-        OrchestratorOp::BoardOrder { .. } => None,
+        OrchestratorOp::BoardOrder { .. } | OrchestratorOp::BoardMove { .. } => None,
     };
     let cursor = match cursor.as_deref().map(parse_cursor).transpose() {
         Ok(cursor) => cursor,
@@ -29,6 +29,42 @@ pub(super) fn serve(call: Call<OrchestratorOp>, cx: &mut App) -> Response {
         let Some(board) = view.orchestrator_view(id).cloned() else {
             return pending();
         };
+        if let OrchestratorOp::BoardMove { item, lane, to } = &call.op {
+            use crate::orchestrator::view::kanban::{error::Error, order};
+            let Some(lane) = order::parse(lane) else {
+                return Response::error(ErrorCode::NotFound, fl!("kanban-order-unknown"));
+            };
+            if view.menu.page.is_some() || cx.has_active_drag() {
+                return Response::error(ErrorCode::Busy, fl!("kanban-move-busy"));
+            }
+            let result = board.update(cx, |board, cx| {
+                board.set_kanban_mapping(&view.config.kanban, cx);
+                let _ = board.request_board(cx);
+                board.propose_card(item, &lane, *to, window, cx)
+            });
+            return match result {
+                Ok(()) => {
+                    view.show_activity_panel(crate::sidebar::ActivityPanel::Kanban, window, cx);
+                    Response::Done {
+                        message: fl!("kanban-move-opened"),
+                    }
+                }
+                Err(Error::Pending) => pending(),
+                Err(error) => Response::error(
+                    match error {
+                        Error::Busy
+                        | Error::Backend(sheprd_orchestrator::Error::Busy)
+                        | Error::Backend(sheprd_orchestrator::Error::Kanban(
+                            sheprd_orchestrator::kanban::Error::MoveBusy,
+                        )) => ErrorCode::Busy,
+                        Error::UnknownCard | Error::UnknownLane => ErrorCode::NotFound,
+                        Error::Unsupported | Error::Model(_) => ErrorCode::Unsupported,
+                        _ => ErrorCode::Failed,
+                    },
+                    error.localize(),
+                ),
+            };
+        }
         if let OrchestratorOp::BoardOrder { lane, before } = &call.op {
             use crate::orchestrator::view::kanban::{error::Error, order};
             let Some(lane) = order::parse(lane) else {

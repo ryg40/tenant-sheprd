@@ -1,7 +1,10 @@
 //! A separate presentation and selection over the existing repository workers.
+mod dialog;
 pub(super) mod drag;
 pub(crate) mod error;
 mod history;
+mod menu;
+mod move_status;
 pub(crate) mod order;
 mod popup;
 mod render;
@@ -27,6 +30,8 @@ pub(super) struct State {
     lines: Vec<rows::Line>,
     locale: Option<sheprd_i18n::Locale>,
     mapping: Mappings,
+    move_dialog: Option<dialog::Dialog>,
+    move_menu: Option<menu::Menu>,
     pub(super) order: Vec<sheprd_orchestrator::kanban::identity::LaneKey>,
     order_chosen: bool,
     order_dirty: bool,
@@ -43,6 +48,8 @@ pub(super) struct State {
     scroll: UniformListScrollHandle,
     selected: Option<CardKey>,
     pub shown: bool,
+    #[cfg(test)]
+    test_move: Option<super::tests::kanban_moves::Peer>,
     visible: Vec<usize>,
 }
 
@@ -209,6 +216,8 @@ impl OrchestratorView {
             self.merge_open = false;
             self.pr.track(None);
             if !shown {
+                self.kanban.move_dialog = None;
+                self.kanban.move_menu = None;
                 self.refresh_rows();
             }
         }
@@ -221,6 +230,11 @@ impl OrchestratorView {
 
     pub(crate) fn set_kanban_mapping(&mut self, mapping: &Mappings, cx: &mut Context<Self>) {
         if self.kanban.mapping != *mapping {
+            for repo in &self.repos {
+                if let Some(service) = &repo.service {
+                    service.moves().cancel_unconfirmed();
+                }
+            }
             self.kanban.mapping = mapping.clone();
             self.kanban.invalidate();
         }
@@ -308,6 +322,7 @@ impl OrchestratorView {
                                 this.kanban.prepared = Some(revision);
                                 this.reconcile_kanban_detail(&ready, cx);
                                 this.kanban.ready = Some(Arc::new(ready));
+                                this.poll_move_dialog(cx);
                                 this.kanban.rebuild_lines();
                                 this.kanban.drag.installed();
                             }
@@ -434,6 +449,23 @@ impl OrchestratorView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
+        if self.kanban.move_dialog.is_some() {
+            self.move_dialog_key(event, window, cx);
+            return true;
+        }
+        if self.kanban.move_menu_open() {
+            self.move_menu_key(event, window, cx);
+            return true;
+        }
+        if event.keystroke.key == "m"
+            && !event.keystroke.modifiers.control
+            && !event.keystroke.modifiers.platform
+            && !event.keystroke.modifiers.alt
+            && !self.search.read(cx).focus.is_focused(window)
+        {
+            self.open_move_menu(window, cx);
+            return true;
+        }
         if self.kanban.popup.is_shown() {
             self.kanban_popup_key(event, window, cx);
             return true;
@@ -445,7 +477,9 @@ impl OrchestratorView {
             }
             return false;
         }
-        if event.keystroke.key == "escape" && self.kanban.drag.active.is_some() {
+        if event.keystroke.key == "escape"
+            && (self.kanban.drag.active.is_some() || self.kanban.drag.active_card.is_some())
+        {
             self.kanban.drag.cancel();
             cx.stop_active_drag(window);
             window.focus(&self.focus, cx);

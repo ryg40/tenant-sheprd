@@ -411,6 +411,7 @@ impl OrchestratorView {
             self.follow_pull_request();
             changed = true;
         }
+        self.poll_move_dialog(cx);
         self.prepare_kanban(cx);
         if self.pr.poll() {
             // A comment or merge landed: read the pull request and list again.

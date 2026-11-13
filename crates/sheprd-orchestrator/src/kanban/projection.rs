@@ -71,6 +71,8 @@ pub struct Board<R> {
     pub cards: Coverage,
     pub lanes: Vec<Lane<R>>,
     pub roster: Coverage,
+    /// Selected routes before filters and display caps, keyed by normalized identity.
+    pub selected_routes: HashMap<(LaneKey, String), Route<R>>,
 }
 
 fn supported(source: &SourceKey) -> bool {
@@ -158,6 +160,7 @@ pub fn project_ordered<'a, R: Clone + 'a>(
             loaded: lanes.len(),
             ..Coverage::default()
         },
+        selected_routes: HashMap::new(),
     };
     let mut grouped: HashMap<String, Vec<CardInput<'a, R>>> = HashMap::new();
     for ((lane, _), input) in unique {
@@ -182,6 +185,10 @@ pub fn project_ordered<'a, R: Clone + 'a>(
             .collect();
         let mut matching = inputs.is_empty() && matches(&key, None);
         for input in inputs {
+            board.selected_routes.insert(
+                (key.clone(), input.item.key.native_id.clone()),
+                input.route.clone(),
+            );
             let mapping = mappings.for_source(&input.item.key.source)?;
             let placement = place(input.item, input.facts, mapping);
             let Some(cell) = cells

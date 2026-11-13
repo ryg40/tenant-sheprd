@@ -79,6 +79,9 @@ pub enum PortsCommand {
     /// Stop or pause (through the app's confirmation) or resume the
     /// processes listening on a port of this computer.
     Signal(u16, PortAction),
+    /// Ask, through the app's confirmation, to stop the servers of this
+    /// computer whose Herdr panes are closed.
+    Prune,
 }
 
 pub(super) fn pr(args: &mut Args) -> Result<PrCommand, CliError> {
@@ -192,6 +195,7 @@ pub(super) fn ports(args: &mut Args) -> Result<PortsCommand, CliError> {
         Some("stop") => PortsCommand::Signal(port(args)?, PortAction::Stop),
         Some("pause") => PortsCommand::Signal(port(args)?, PortAction::Pause),
         Some("resume") => PortsCommand::Signal(port(args)?, PortAction::Resume),
+        Some("prune") => PortsCommand::Prune,
         _ => return Err(unknown("ports", verb)),
     })
 }

@@ -37,5 +37,6 @@ pub(super) fn listener(number: u16, pid: u32, started: u64) -> Listener {
         memory: 0,
         system: false,
         paused: false,
+        started: None,
     }
 }

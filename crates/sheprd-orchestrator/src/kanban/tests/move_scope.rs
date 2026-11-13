@@ -26,6 +26,10 @@ pub(crate) fn fixture() -> (Proposal, Fresh) {
             source_generation: uuid::Uuid::new_v4(),
         },
         facts: complete(),
+        identity: moves::Identity::Forgejo {
+            repository: 11,
+            issue: 71,
+        },
         item,
         labels: Labels {
             in_progress: Some(Label {
@@ -154,6 +158,6 @@ fn approvals_refuse_missing_cancelled_reused_stale_and_cross_scope_without_mutat
     anonymous.context.account.clear();
     assert!(matches!(
         MovePlan::prepare(proposal, anonymous),
-        Err(Error::MovePermission)
+        Err(Error::MovePermission { .. })
     ));
 }

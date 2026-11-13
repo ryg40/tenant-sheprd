@@ -36,6 +36,7 @@ impl Label {
     pub(crate) const RENAME: Self = Self::new("worktree-popover-rename");
     pub(crate) const RUN_SCRIPT: Self = Self::new("worktree-popover-run-script");
     pub(crate) const RUN_SETUP_SCRIPT: Self = Self::new("worktree-popover-run-setup-script");
+    pub(crate) const STOP_ORPHANS: Self = Self::new("local-ports-prune");
     pub(crate) const TELEPORT: Self = Self::new("worktree-popover-teleport");
     pub(crate) const TELEPORT_BACK: Self = Self::new("worktree-popover-teleport-back");
     pub(crate) const UNMUTE: Self = Self::new("worktree-popover-unmute");

@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 pub const COMMENTS_WAIT_SECONDS: u64 = 20;
 /// How long `ports open` may wait for a new forward to listen.
 pub const FORWARD_WAIT_SECONDS: u64 = 20;
-/// How long `ports all` and `ports stop|pause|resume` may wait for a fresh
-/// scan of this computer.
+/// How long `ports all`, `ports stop|pause|resume`, and `ports prune` may
+/// wait for a fresh scan of this computer.
 pub const LOCAL_PORTS_WAIT_SECONDS: u64 = 20;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -62,6 +62,9 @@ pub enum HostOp {
         port: u16,
         action: PortAction,
     },
+    /// Ask to stop the servers of this computer whose Herdr panes are
+    /// closed. Only opens the app's confirmation: the user decides there.
+    PruneOrphanedPorts,
     Usage,
     System,
     /// The Dependabot alerts the Security section last read.
@@ -100,7 +103,9 @@ impl HostOp {
             Self::PrComments => COMMENTS_WAIT_SECONDS,
             Self::OpenPort { .. } => FORWARD_WAIT_SECONDS,
             // A command waits for a fresh scan before it lists or asks.
-            Self::LocalPorts | Self::SignalPort { .. } => LOCAL_PORTS_WAIT_SECONDS,
+            Self::LocalPorts | Self::SignalPort { .. } | Self::PruneOrphanedPorts => {
+                LOCAL_PORTS_WAIT_SECONDS
+            }
             _ => 0,
         }
     }

@@ -18,3 +18,7 @@ listening-ports-tunnel-closed = Closed the SSH tunnel to :{ $port }
 listening-ports-tunnel-opening = A tunnel to that port is already opening
 # $error says why.
 listening-ports-open-failed = Could not open :{ $port }: { $error }
+# The third line of a port's tooltip, and the tooltip of a Ports row's
+# "Pane closed" tag, when the pane's daemon says the pane that started the
+# server is closed and the server still runs.
+listening-ports-orphaned = Its pane is closed; the server still runs

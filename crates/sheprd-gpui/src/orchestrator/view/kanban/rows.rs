@@ -90,6 +90,7 @@ pub(crate) struct Prepared {
     pub(super) partial: bool,
     pub(super) roster: Vec<LaneKey>,
     pub(super) routes: Vec<RouteSnapshot>,
+    pub(super) selected_routes: HashMap<(LaneKey, String), Route<usize>>,
     pub(super) totals: Vec<SharedString>,
     pub(super) tracked: Option<Tracked>,
 }
@@ -167,7 +168,7 @@ pub(in crate::orchestrator::view) fn prepare(
     lane_order: LaneOrder,
 ) -> Result<Prepared, error::Error> {
     // Keep the original worker identity fence, separate from retained read-only rows.
-    let routes = inputs
+    let routes: Vec<_> = inputs
         .iter()
         .map(|input| RouteSnapshot {
             history: input.snapshot.history.clone(),
@@ -446,6 +447,7 @@ pub(in crate::orchestrator::view) fn prepare(
         partial: board.cards.truncated() || board.roster.truncated(),
         roster: full_roster,
         routes,
+        selected_routes: board.selected_routes,
         totals: Vec::new(),
         tracked: tracked.into_inner(),
     };
@@ -552,6 +554,20 @@ pub(in crate::orchestrator::view) fn prepare(
                         .map(|(_, text)| text.clone())
                         .unwrap_or_default(),
                 };
+                let status = inputs[card.route.worker]
+                    .snapshot
+                    .moves
+                    .iter()
+                    .find(|status| status.card == card.key);
+                let can_move = move_status::available(&card.item);
+                let move_label = status.map(move_status::label).unwrap_or_else(|| {
+                    if can_move {
+                        fl!("kanban-move-proposal")
+                    } else {
+                        fl!("kanban-move-unavailable")
+                    }
+                });
+                let suffix = status.map(move_status::label).unwrap_or(suffix);
                 let summary = wire::Card {
                     key: card.key.item.canonical(),
                     lane: canonical.clone(),
@@ -568,14 +584,19 @@ pub(in crate::orchestrator::view) fn prepare(
                         LabelCompleteness::Incomplete => "incomplete".into(),
                     }),
                     warnings: warnings.into_iter().map(|(code, _)| code.into()).collect(),
-                    can_move: false,
-                    read_only_reason: "board_read_only".into(),
+                    can_move,
+                    read_only_reason: if can_move {
+                        String::new()
+                    } else {
+                        "unsupported_move".into()
+                    },
                 };
                 let name = fl!(
                     "kanban-card-name",
                     title = card.item.title.clone(),
                     source = canonical.clone(),
-                    column = column(cell.column)
+                    column = column(cell.column),
+                    status = move_label
                 )
                 .into();
                 prepared

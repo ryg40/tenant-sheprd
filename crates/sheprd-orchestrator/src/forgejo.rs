@@ -3,7 +3,8 @@
 //! `native_id` is an issue's number and `pr/<number>` a pull request's,
 //! both shown `#<number>`, since Forgejo numbers them in one sequence. Only
 //! complete active listings replace active rows. `history` keeps bounded
-//! settled samples separately. Nothing is ever written to Forgejo.
+//! settled samples separately. `moves` supplies approved issue deltas; the
+//! native confirmation entry point remains disabled.
 //!
 //! A remote is Forgejo when its host's name holds `forgejo` or `gitea`, is
 //! `codeberg.org` (`named_by`), or is the host `FORGEJO_HOST` names
@@ -14,6 +15,7 @@
 mod error;
 pub mod history;
 pub mod issue;
+pub mod moves;
 pub mod pull_request;
 pub mod search;
 

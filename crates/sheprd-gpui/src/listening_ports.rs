@@ -9,11 +9,13 @@
 // i18n: migrated
 
 mod error;
+mod orphans;
 mod render;
 mod scan;
 pub(crate) mod tunnel;
 
 pub(crate) use error::Error;
+pub(crate) use orphans::{Closed, Endpoint, Known};
 
 #[cfg(test)]
 mod tests;
@@ -24,17 +26,16 @@ use crate::{
     usage::{Host, Shell},
 };
 pub(crate) use render::{chips, close_button};
-#[cfg(test)]
 pub(crate) use scan::Owner;
 // The Ports section's Unix scan reads its addresses the same way.
 #[cfg(unix)]
 pub(crate) use scan::listener;
-pub(crate) use scan::{Bind, Link, Origin, Port, Scan, parse};
+pub(crate) use scan::{Asked, Bind, Link, Origin, Port, Scan, parse, socket, token};
 use sheprd_client::ConnectTarget;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     path::{Path, PathBuf},
-    sync::{Arc, mpsc},
+    sync::{Arc, Mutex, mpsc},
     thread,
     time::{Duration, Instant},
 };
@@ -79,7 +80,6 @@ impl Daemon {
         Some(Self { host, identity })
     }
 
-    #[cfg(test)]
     pub(crate) fn host(&self) -> &Host {
         &self.host
     }
@@ -88,6 +88,22 @@ impl Daemon {
     /// tells its panes from another daemon's rather than accepting all.
     pub(crate) fn identified(&self) -> bool {
         self.identity.is_some()
+    }
+
+    /// Adds this daemon to the ones its host's scan may ask about panes:
+    /// the API socket beside its client socket, or its remote session.
+    fn allow(&self, asked: &mut Asked) {
+        match &self.identity {
+            Some(Identity::Client(client)) => {
+                if let Some(api) = api_socket(client).filter(|api| !asked.sockets.contains(api)) {
+                    asked.sockets.push(api);
+                }
+            }
+            Some(Identity::Session(name)) if session(name) && !asked.sessions.contains(name) => {
+                asked.sessions.push(name.clone());
+            }
+            Some(Identity::Session(_)) | None => {}
+        }
     }
 
     /// Whether a pane whose `HERDR_SOCKET_PATH` was `socket` is this daemon's.
@@ -110,6 +126,44 @@ impl Daemon {
 fn client_socket(api: &Path) -> Option<PathBuf> {
     let stem = api.file_stem()?.to_str()?;
     Some(api.parent()?.join(format!("{stem}-client.sock")))
+}
+
+/// The API socket beside `client`, `herdr.sock` beside `herdr-client.sock`,
+/// as one line of plain text; `None` for a socket not named that way.
+fn api_socket(client: &Path) -> Option<String> {
+    let stem = client.file_name()?.to_str()?.strip_suffix("-client.sock")?;
+    let api = client
+        .parent()?
+        .join(format!("{stem}.sock"))
+        .into_os_string()
+        .into_string()
+        .ok()?;
+    (!stem.is_empty() && socket(&api) == api).then_some(api)
+}
+
+/// Whether `name` is a session name the scan may put into a path: the
+/// characters Herdr allows in one, and never `.` or `..`.
+fn session(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && !matches!(name, "." | "..")
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+}
+
+/// The `herdr` a host's scan asks about panes: the one this app starts its
+/// daemon with on this computer, the host's own on its `PATH` elsewhere;
+/// never one a listener names. Empty, so nothing is asked, when the path is
+/// not text.
+fn program(host: &Host) -> String {
+    match host {
+        Host::Local => crate::daemon::executable()
+            .into_os_string()
+            .into_string()
+            .unwrap_or_default(),
+        _ => "herdr".into(),
+    }
 }
 
 /// `…/sessions/<name>/herdr.sock` belongs to session `name`; the socket in
@@ -153,8 +207,8 @@ fn local_shell() -> Result<Shell> {
     Err(Error::Unsupported.into())
 }
 
-fn scan(shell: &mut Shell) -> Result<Scan> {
-    let output = shell.run(scan::COMMAND, STEP_TIMEOUT).map_err(failed)?;
+fn scan(shell: &mut Shell, step: &str) -> Result<Scan> {
+    let output = shell.run(step, STEP_TIMEOUT).map_err(failed)?;
     parse(&output.stdout)
 }
 
@@ -174,13 +228,13 @@ impl Drop for Worker {
     }
 }
 
-fn spawn(host: Host) -> Option<Worker> {
+fn spawn(host: Host, asked: Arc<Mutex<Asked>>) -> Option<Worker> {
     let stop = Arc::new(Stop::default());
     let (sender, results) = mpsc::sync_channel(2);
     let shared = stop.clone();
     let spawned = thread::Builder::new()
         .name("herdr-listening-ports".into())
-        .spawn(move || run(&host, &shared, &sender));
+        .spawn(move || run(&host, &asked, &shared, &sender));
     match spawned {
         Ok(_) => Some(Worker { stop, results }),
         Err(error) => {
@@ -190,15 +244,21 @@ fn spawn(host: Host) -> Option<Worker> {
     }
 }
 
-fn run(host: &Host, stop: &Stop, results: &mpsc::SyncSender<Result<Scan>>) {
+fn run(host: &Host, asked: &Mutex<Asked>, stop: &Stop, results: &mpsc::SyncSender<Result<Scan>>) {
+    let herdr = program(host);
     let mut shell: Option<Shell> = None;
     loop {
+        // A poisoned list asks nothing.
+        let step = asked
+            .lock()
+            .map(|asked| scan::step(&asked, &herdr))
+            .unwrap_or_else(|_| scan::step(&Asked::default(), ""));
         let opened = match shell.take() {
             Some(shell) => Ok(shell),
             None => open(host),
         };
         let result = opened.and_then(|mut opened| {
-            let ports = scan(&mut opened);
+            let ports = scan(&mut opened, &step);
             // A failed step leaves the shell unusable; a missing tool does not.
             if !matches!(ports, Err(crate::Error::ListeningPorts(Error::Scan(_)))) {
                 shell = Some(opened);
@@ -226,6 +286,9 @@ struct Reading {
     /// Why the latest scan failed, as last logged; the last good ports stay
     /// shown.
     error: Option<String>,
+    /// The ports of each owner whose servers outlived their panes, as the
+    /// last [`ListeningPorts::classify`] found them.
+    orphaned: HashMap<Owner, HashSet<u16>>,
 }
 
 impl Reading {
@@ -256,6 +319,9 @@ impl Reading {
 
 #[derive(Default)]
 struct Monitor {
+    /// The daemons its scan may ask about panes, which its worker reads
+    /// before each scan.
+    asked: Arc<Mutex<Asked>>,
     /// None once its thread could not start or has ended.
     worker: Option<Worker>,
     reading: Reading,
@@ -266,12 +332,26 @@ struct Monitor {
 pub(crate) struct Listed<'a> {
     pub ports: &'a [Port],
     pub origin: &'a Origin,
+    /// The numbers among `ports` whose servers outlived their panes.
+    pub orphaned: Option<&'a HashSet<u16>>,
+}
+
+impl Listed<'_> {
+    /// Whether `port`'s server outlived the pane that started it.
+    pub(crate) fn orphaned(&self, port: &Port) -> bool {
+        self.orphaned
+            .is_some_and(|orphaned| orphaned.contains(&port.number))
+    }
 }
 
 /// Every scanned host's listening ports, keyed by host.
 #[derive(Default)]
 pub(crate) struct ListeningPorts {
     monitors: HashMap<Host, Monitor>,
+    /// The panes the last classification went by.
+    known: Known,
+    /// A scan changed since the last classification.
+    unclassified: bool,
 }
 
 impl ListeningPorts {
@@ -284,6 +364,7 @@ impl ListeningPorts {
                 .then_some(Listed {
                     ports,
                     origin: &reading.origin,
+                    orphaned: reading.orphaned.get(owner),
                 })
         })
     }
@@ -320,19 +401,94 @@ impl ListeningPorts {
             .any(|port| matches!(port.link(&reading.origin), Some(Link::Tunnel(listed)) if listed == *key))
     }
 
+    /// Every scanned process whose daemon said its pane is closed.
+    pub fn closed(&self) -> impl Iterator<Item = Closed> + '_ {
+        self.monitors.iter().flat_map(|(host, monitor)| {
+            monitor
+                .reading
+                .scan
+                .closed
+                .iter()
+                .map(|(pid, pane)| Closed {
+                    host: host.clone(),
+                    pane: pane.clone(),
+                    pid: *pid,
+                })
+        })
+    }
+
+    /// Whether the marks are still those of `endpoints` and every scan
+    /// taken, so classifying again would change nothing. It allocates
+    /// nothing, as the window asks every frame.
+    pub fn classified<'a>(&self, endpoints: impl IntoIterator<Item = Endpoint<'a>>) -> bool {
+        !self.unclassified && self.known.same(endpoints)
+    }
+
+    /// Marks the ports whose servers outlived their panes, by `known`, when
+    /// it or a scan changed since the last time. Whether any mark changed.
+    pub fn classify(&mut self, known: &Known) -> bool {
+        if !self.unclassified && self.known == *known {
+            return false;
+        }
+        self.unclassified = false;
+        self.known = known.clone();
+        let mut changed = false;
+        for (host, monitor) in &mut self.monitors {
+            let reading = &mut monitor.reading;
+            let orphaned: HashMap<Owner, HashSet<u16>> = reading
+                .scan
+                .ports
+                .iter()
+                .filter_map(|(owner, ports)| {
+                    let numbers: HashSet<u16> = ports
+                        .iter()
+                        .filter(|port| known.orphaned(host, &owner.socket, port.pane.as_deref()))
+                        .map(|port| port.number)
+                        .collect();
+                    (!numbers.is_empty()).then(|| (owner.clone(), numbers))
+                })
+                .collect();
+            changed |= orphaned != reading.orphaned;
+            reading.orphaned = orphaned;
+        }
+        changed
+    }
+
+    /// Lets each host's scan ask about panes only the daemons among
+    /// `daemons` on that host, the ones the window shows; a host with none
+    /// asks nothing.
+    pub fn ask(&mut self, daemons: impl IntoIterator<Item = Daemon>) {
+        let mut wanted: HashMap<Host, Asked> = HashMap::new();
+        for daemon in daemons {
+            daemon.allow(wanted.entry(daemon.host.clone()).or_default());
+        }
+        for (host, monitor) in &self.monitors {
+            let asked = wanted.remove(host).unwrap_or_default();
+            // A poisoned list stays as it was; its worker asks nothing.
+            if let Ok(mut shared) = monitor.asked.lock()
+                && *shared != asked
+            {
+                *shared = asked;
+            }
+        }
+    }
+
     /// Shows `scan` for `host` as if a scan had found it, with no worker.
     #[cfg(test)]
     pub(crate) fn seed(&mut self, host: Host, scan: Scan) {
+        self.unclassified = true;
         let reading = Reading {
             origin: Origin::new(&host),
             scan,
             error: None,
+            orphaned: HashMap::new(),
         };
         self.monitors.insert(
             host,
             Monitor {
                 worker: None,
                 reading,
+                ..Monitor::default()
             },
         );
     }
@@ -358,20 +514,26 @@ impl ListeningPorts {
             keep
         });
         for host in wanted {
-            self.monitors
-                .entry(host)
-                .or_insert_with_key(|host| Monitor {
-                    worker: spawn(host.clone()),
+            self.monitors.entry(host).or_insert_with_key(|host| {
+                let asked = Arc::default();
+                Monitor {
+                    worker: spawn(host.clone(), Arc::clone(&asked)),
+                    asked,
                     reading: Reading {
                         origin: Origin::new(host),
                         ..Reading::default()
                     },
-                });
+                }
+            });
         }
         for monitor in self.monitors.values_mut() {
             while let Some(worker) = &monitor.worker {
                 match worker.results.try_recv() {
-                    Ok(result) => changed |= monitor.reading.apply(result),
+                    Ok(result) => {
+                        let applied = monitor.reading.apply(result);
+                        self.unclassified |= applied;
+                        changed |= applied;
+                    }
                     Err(mpsc::TryRecvError::Empty) => break,
                     Err(mpsc::TryRecvError::Disconnected) => monitor.worker = None,
                 }

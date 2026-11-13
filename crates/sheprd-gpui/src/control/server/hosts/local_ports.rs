@@ -1,7 +1,8 @@
-//! `ports all` and `ports stop|pause|resume`: every port this computer's
-//! user listens on, as the Ports section lists them. A request keeps the
-//! section's scan running for a minute and waits for its first listing;
-//! stopping and pausing only open the app's confirmation.
+//! `ports all`, `ports stop|pause|resume`, and `ports prune`: every port
+//! this computer's user listens on, as the Ports section lists them. A
+//! request keeps the section's scan running for a minute and waits for its
+//! first listing; stopping, pausing, and pruning only open the app's
+//! confirmation.
 
 use super::{Watches, socket, window_for};
 use crate::{
@@ -10,7 +11,7 @@ use crate::{
         Caller, ErrorCode, Response,
         hosts::{LOCAL_PORTS_WAIT_SECONDS, LocalPortInfo, LocalPorts, PortAction, Reply},
     },
-    local_ports::{DEMAND, Listener, Pending, SUPPORTED, home_relative},
+    local_ports::{Batch, DEMAND, Listener, Pending, SUPPORTED, home_relative, orphaned},
 };
 use gpui::{App, Context, Window};
 use std::time::{Duration, Instant, SystemTime};
@@ -105,7 +106,11 @@ fn signal(
             },
         ));
     }
-    let pending = Pending { action, listeners };
+    let pending = Pending {
+        action,
+        batch: Batch::Chosen,
+        listeners,
+    };
     let count = pending.victims().len();
     if action == PortAction::Resume {
         return Some(match view.local_ports.signal(action, pending.victims()) {
@@ -122,6 +127,67 @@ fn signal(
             "Asked to {} {count} process(es) on port {port}; nothing is signalled until the user confirms",
             action.name()
         ))
+    } else {
+        Response::error(
+            ErrorCode::WindowBusy,
+            "A dialog is open in the window; close it first",
+        )
+    })
+}
+
+/// Asks to stop every server whose Herdr pane is closed, listing them;
+/// nothing is signalled until the user confirms in the window.
+fn ask_to_prune(
+    view: &mut SheprdWindow,
+    requested: Instant,
+    window: &mut Window,
+    cx: &mut Context<SheprdWindow>,
+) -> Option<Response> {
+    let listeners = match listing(view, requested)? {
+        Ok(listeners) => orphaned(listeners, &view.known_panes(), None),
+        Err(response) => return Some(response),
+    };
+    let now = SystemTime::now();
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    let listening: Vec<LocalPortInfo> = listeners
+        .iter()
+        .map(|listener| {
+            let workspace = view
+                .local_port_owner(listener.identity.pid)
+                .map(|owned| owned.label);
+            info(listener, workspace, now, home.as_deref())
+        })
+        .collect();
+    let reply = |listening, note: String| Response::Host {
+        reply: Reply::LocalPorts(Box::new(LocalPorts {
+            listening,
+            note: Some(note),
+        })),
+    };
+    if listeners.is_empty() {
+        // The check rides on the workspace port scan; with it off, "none"
+        // would claim what was never checked.
+        let note = if view.config.show_listening_ports {
+            "No server of this computer outlived its Herdr pane"
+        } else {
+            "Sheprd does not check for orphaned servers: show_listening_ports is off"
+        };
+        return Some(reply(Vec::new(), note.into()));
+    }
+    let pending = Pending {
+        action: PortAction::Stop,
+        batch: Batch::Orphaned,
+        listeners,
+    };
+    let count = pending.victims().len();
+    Some(if view.ask_to_signal_ports(pending, window, cx) {
+        super::super::work::bring_forward(window, cx);
+        reply(
+            listening,
+            format!(
+                "Asked to stop {count} orphaned server(s); nothing is signalled until the user confirms"
+            ),
+        )
     } else {
         Response::error(
             ErrorCode::WindowBusy,
@@ -208,4 +274,13 @@ pub(super) fn act(
         cx,
         move |view, requested, window, cx| signal(view, requested, port, action, window, cx),
     );
+}
+
+pub(super) fn prune(
+    caller: &Caller,
+    incoming: socket::Incoming,
+    watches: &mut Watches,
+    cx: &mut App,
+) {
+    wait(caller, incoming, watches, cx, ask_to_prune);
 }

@@ -684,6 +684,9 @@ impl SheprdWindow {
                 (WorkspaceMenuAction::Collapse, Label::COLLAPSE_GROUP)
             });
         }
+        if self.orphan_scope(&target.id).is_some() {
+            items.push((WorkspaceMenuAction::StopOrphans, Label::STOP_ORPHANS));
+        }
         if target.can_delete() {
             items.push((
                 Dialog(WorkspaceAction::DeleteWorktree),
@@ -900,6 +903,17 @@ impl SheprdWindow {
             WorkspaceMenuAction::Script(kind) => self.run_workspace_script(kind, window, cx),
             #[cfg(feature = "cloud")]
             WorkspaceMenuAction::SandboxImages => self.build_workspace_sandbox_images(window, cx),
+            WorkspaceMenuAction::StopOrphans => {
+                let scope = self
+                    .menu
+                    .target
+                    .as_ref()
+                    .and_then(|target| self.orphan_scope(&target.id));
+                self.dismiss_menu(window, cx);
+                if scope.is_some() {
+                    self.stop_orphaned_servers(scope, cx);
+                }
+            }
             WorkspaceMenuAction::Orchestrator => {
                 if let Some(target) = &self.menu.target {
                     let workspace = target.id.clone();

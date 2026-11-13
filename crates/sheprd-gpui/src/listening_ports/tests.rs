@@ -10,6 +10,9 @@ use sheprd_client::ConnectTarget;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 mod en_xa;
+#[cfg(unix)]
+mod herdr_answers;
+mod orphans;
 mod process_owner;
 #[cfg(unix)]
 mod repeated_scans;
@@ -39,6 +42,7 @@ fn port(number: u16, bind: Bind, process: &str) -> Port {
         number,
         bind,
         process: process.into(),
+        pane: None,
     }
 }
 

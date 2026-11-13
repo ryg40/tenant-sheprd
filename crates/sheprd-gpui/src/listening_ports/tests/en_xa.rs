@@ -8,9 +8,11 @@ fn every_port_hint_is_a_message_under_en_xa() {
         number: 3000,
         bind: Bind::Loopback,
         process: "node".into(),
+        pane: None,
     };
     let unnamed = Port {
         process: String::new(),
+        pane: None,
         ..named.clone()
     };
     let tunnel = Link::Tunnel(Key {

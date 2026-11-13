@@ -14,6 +14,8 @@ use crate::{
 use gpui::{prelude::*, *};
 
 const GAP: f32 = 6.;
+/// How faint a port whose server outlived its pane is drawn.
+const ORPHANED_OPACITY: f32 = 0.45;
 
 impl SheprdWindow {
     /// The focused workspace's ports in the status bar; nothing while hidden
@@ -85,7 +87,8 @@ impl SheprdWindow {
 
 /// A globe and one clickable number per port. `place` is the endpoint and
 /// workspace whose browser tab a click opens. A port reached through an open
-/// SSH tunnel also gets a small close button that shuts that tunnel.
+/// SSH tunnel also gets a small close button that shuts that tunnel. A port
+/// whose server outlived its pane is dimmed, and its tooltip says so.
 pub(crate) fn chips(
     listed: super::Listed<'_>,
     (endpoint, workspace): (&str, &str),
@@ -109,13 +112,20 @@ pub(crate) fn chips(
         )
         .children(listed.ports.iter().map(|port| {
             let link = port.link(listed.origin);
-            let hint = SharedString::from(hint(port, link.as_ref()));
+            let orphaned = listed.orphaned(port);
+            let mut text = hint(port, link.as_ref());
+            if orphaned {
+                text.push('\n');
+                text.push_str(&fl!("listening-ports-orphaned"));
+            }
+            let hint = SharedString::from(text);
             let id = SharedString::from(format!("port-{endpoint}-{workspace}-{}", port.number));
             let chip = div()
                 .id(id.clone())
                 .debug_selector(|| id.to_string())
                 .flex_none()
                 .text_color(rgb(muted))
+                .when(orphaned, |chip| chip.opacity(ORPHANED_OPACITY))
                 .child(format!(":{}", port.number))
                 .tooltip(move |_, cx| {
                     cx.new(|_| crate::usage::Hint {

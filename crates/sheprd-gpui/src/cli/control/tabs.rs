@@ -69,6 +69,11 @@ pub enum OrchestratorCommand {
     Board {
         cursor: Option<String>,
     },
+    BoardMove {
+        item: String,
+        lane: String,
+        to: sheprd_control_protocol::BoardColumn,
+    },
     BoardOrder {
         lane: String,
         before: Option<String>,

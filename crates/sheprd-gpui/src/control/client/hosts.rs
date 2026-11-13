@@ -97,6 +97,9 @@ pub(super) fn cloud(command: CloudCommand, context: &Context) -> crate::Result<O
 }
 
 pub(super) fn ports(command: PortsCommand, context: &Context) -> crate::Result<Output> {
+    if command == PortsCommand::Prune {
+        return prune(context);
+    }
     let op = match command {
         PortsCommand::List => HostOp::Ports,
         PortsCommand::Forward(port) => HostOp::Forward { port },
@@ -104,6 +107,7 @@ pub(super) fn ports(command: PortsCommand, context: &Context) -> crate::Result<O
         PortsCommand::Open(port) => HostOp::OpenPort { port },
         PortsCommand::All => HostOp::LocalPorts,
         PortsCommand::Signal(port, action) => HostOp::SignalPort { port, action },
+        PortsCommand::Prune => HostOp::PruneOrphanedPorts,
     };
     match context.call(Request::Host, op)? {
         Response::Done { message } => Ok(Output::message(message)),
@@ -121,6 +125,23 @@ pub(super) fn ports(command: PortsCommand, context: &Context) -> crate::Result<O
             let output = Output::data(text::local_ports(&ports), &ports)?;
             Ok(if empty { output.nothing() } else { output })
         }
+        response => Err(unexpected(response)),
+    }
+}
+
+/// `ports prune`: the servers the app asks about, or its note that there
+/// are none, which exits 4.
+fn prune(context: &Context) -> crate::Result<Output> {
+    match context.call(Request::Host, HostOp::PruneOrphanedPorts)? {
+        Response::Host {
+            reply: Reply::LocalPorts(ports),
+        } if ports.listening.is_empty() => {
+            let note = ports.note.clone().unwrap_or_default();
+            Ok(Output::data(note, &ports)?.nothing())
+        }
+        Response::Host {
+            reply: Reply::LocalPorts(ports),
+        } => Output::data(text::local_ports(&ports), &ports),
         response => Err(unexpected(response)),
     }
 }

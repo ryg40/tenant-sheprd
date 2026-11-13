@@ -16,6 +16,7 @@ mod naming;
 mod pinned;
 #[cfg(unix)]
 mod process;
+mod prune;
 mod row;
 #[cfg(unix)]
 mod scan;
@@ -27,16 +28,20 @@ mod worker;
 mod tests;
 
 pub(crate) use error::Error;
+pub(crate) use prune::orphaned;
+pub(crate) use section::uptime_text;
 
 use crate::{
     Result,
     browser::WebUrl,
     i18n::Localize,
-    listening_ports::{Bind, Link, Origin, Port},
+    listening_ports::{Bind, Known, Link, Origin, Port},
     processes::Identity,
+    usage::Host,
 };
 use sheprd_control_protocol::protocol::hosts::PortAction;
 use std::{
+    collections::HashSet,
     path::{Path, PathBuf},
     sync::{
         Arc,
@@ -81,6 +86,18 @@ pub(crate) struct Listener {
     pub system: bool,
     /// Stopped by SIGSTOP or a debugger.
     pub paused: bool,
+    /// The Herdr pane it was started in, as its environment says.
+    pub started: Option<Started>,
+}
+
+/// The Herdr pane a process was started in: the `HERDR_WORKSPACE_ID`,
+/// `HERDR_PANE_ID`, and `HERDR_SOCKET_PATH` of its environment.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Started {
+    pub pane: String,
+    /// The JSON API socket of the pane's daemon; empty when unknown.
+    pub socket: String,
+    pub workspace: String,
 }
 
 /// How the section orders its rows. The user's own servers always come
@@ -123,6 +140,7 @@ impl Listener {
             number: self.number,
             bind: self.bind,
             process: self.process.clone(),
+            pane: None,
         }
     }
 
@@ -137,6 +155,18 @@ impl Listener {
             Link::Page(url) => Some(url),
             Link::Tunnel(_) => None,
         }
+    }
+
+    /// Whether its server outlived the pane of this computer that started it.
+    pub(crate) fn orphaned(&self, known: &Known) -> bool {
+        self.started.as_ref().is_some_and(|started| {
+            known.orphaned_process(
+                &Host::Local,
+                self.identity.pid,
+                &started.socket,
+                &started.pane,
+            )
+        })
     }
 
     /// How long its process has run, by the OS's start time.
@@ -175,7 +205,18 @@ pub(crate) enum Outcome {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Pending {
     pub action: PortAction,
+    pub batch: Batch,
     pub listeners: Vec<Listener>,
+}
+
+/// Why the rows of a [`Pending`] were chosen, which its question says.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum Batch {
+    /// The user or a command named them.
+    #[default]
+    Chosen,
+    /// Their servers outlived the panes that started them.
+    Orphaned,
 }
 
 impl Pending {
@@ -292,6 +333,14 @@ pub(crate) struct LocalPorts {
     /// Whether the bar counts the user's servers, which keeps a slower
     /// scan running while the section is closed.
     pub(crate) counted: bool,
+    /// The rows of `listing` whose servers outlived their panes.
+    orphaned: HashSet<Identity>,
+    /// The panes the last classification went by.
+    known: Known,
+    /// A listing arrived since the last classification.
+    unclassified: bool,
+    /// A "Stop orphaned servers" waiting for a fresh listing.
+    prune: Option<prune::Prune>,
 }
 
 /// Why the port list failed: in the app's language for the section, and in
@@ -332,7 +381,8 @@ impl LocalPorts {
         }
         self.shown = shown;
         let demanded = self.demand.is_some_and(|until| now < until);
-        let wanted = SUPPORTED && (shown || self.acting || demanded || self.counted);
+        let wanted =
+            SUPPORTED && (shown || self.acting || demanded || self.counted || self.prune.is_some());
         if !wanted {
             self.demand = None;
             self.start_failed = false;
@@ -388,6 +438,7 @@ impl LocalPorts {
             Update::Listing(started, Ok(mut listing)) => {
                 listing.truncate(ROW_LIMIT);
                 self.listing = Some(listing);
+                self.unclassified = true;
                 self.error = None;
                 self.scanned = Some(started);
             }
@@ -521,10 +572,46 @@ impl LocalPorts {
         Ok(())
     }
 
+    /// Marks the rows whose servers outlived their panes, by `known`, when
+    /// it or the listing changed since the last time. Whether any changed.
+    pub(crate) fn classify(&mut self, known: &Known) -> bool {
+        if !self.unclassified && self.known == *known {
+            return false;
+        }
+        self.unclassified = false;
+        self.known = known.clone();
+        let orphaned: HashSet<Identity> = self
+            .listing()
+            .unwrap_or_default()
+            .iter()
+            .filter(|listener| listener.orphaned(known))
+            .map(|listener| listener.identity)
+            .collect();
+        let changed = orphaned != self.orphaned;
+        self.orphaned = orphaned;
+        changed
+    }
+
+    /// Whether no listing arrived since the last classification.
+    pub(crate) fn classified(&self) -> bool {
+        !self.unclassified
+    }
+
+    /// Whether the row of `identity` outlived its pane, as last classified.
+    pub(crate) fn orphaned(&self, identity: Identity) -> bool {
+        self.orphaned.contains(&identity)
+    }
+
+    /// Whether any row outlived its pane, as last classified.
+    pub(crate) fn any_orphaned(&self) -> bool {
+        !self.orphaned.is_empty()
+    }
+
     /// Shows `listing` as if a scan had found it, with no worker.
     #[cfg(test)]
     pub(crate) fn seed(&mut self, listing: Vec<Listener>) {
         self.listing = Some(listing);
+        self.unclassified = true;
     }
 
     /// Shows `error` as if the latest scan had failed with it; Windows

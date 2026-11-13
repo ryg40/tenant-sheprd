@@ -50,6 +50,7 @@ fn the_ports_section_and_its_question_show_only_messages_under_en_xa() {
                 view.ask_to_signal_ports(
                     Pending {
                         action: PortAction::Stop,
+                        batch: Batch::Chosen,
                         listeners: vec![paused.clone()],
                     },
                     window,

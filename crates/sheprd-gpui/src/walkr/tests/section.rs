@@ -58,7 +58,7 @@ fn probes_require_the_walkr_section_or_live_demand(cx: &mut gpui::TestAppContext
                 if let Some(duration) = demand {
                     view.walkr.demand(Instant::now() + duration);
                 }
-                view.update_walkr(cx);
+                view.update_walkr();
                 let worker = view.walkr.worker.as_ref().unwrap();
                 // The wake channel also carries cancellation, so read its command mailbox.
                 let _ = commands.try_recv();

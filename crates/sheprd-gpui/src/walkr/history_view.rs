@@ -5,6 +5,7 @@
 use super::{
     history::{Detail, Error, OptionBody, Row, RowState, Status},
     sessions::Shown,
+    waiting_view::remote_line,
 };
 use crate::{SheprdWindow, direction::Logical, i18n::fl, motion};
 use gpui::{prelude::*, *};
@@ -17,7 +18,7 @@ const LIST_WIDTH: f32 = 280.;
 const LIST_HEIGHT: f32 = 200.;
 
 /// When a session was made, in this computer's time zone.
-fn local_time(row_time: Option<chrono::DateTime<chrono::Utc>>) -> String {
+pub(super) fn local_time(row_time: Option<chrono::DateTime<chrono::Utc>>) -> String {
     row_time.map_or_else(String::new, |time| {
         time.with_timezone(&chrono::Local)
             .format("%Y-%m-%d %H:%M")
@@ -155,6 +156,7 @@ impl SheprdWindow {
         } else {
             None
         };
+        let waiting = self.walkr_waiting(cx);
         let rows = sessions.rows().iter().enumerate().map(|(index, row)| {
             let picked = sessions.pick() == Some(row.id.as_str());
             self.walkr_row(index, row, live == Some(row.id.as_str()), picked, cx)
@@ -175,6 +177,7 @@ impl SheprdWindow {
                     .text_color(rgb(theme.muted))
                     .child(fl!("walkr-history-title")),
             )
+            .child(waiting)
             .children(note.map(|note| div().px_3().py_1().text_color(rgb(theme.muted)).child(note)))
             .children(rows)
     }
@@ -204,6 +207,27 @@ impl SheprdWindow {
         };
         let id = row.id.clone();
         let time = local_time(row.created);
+        let waits = matches!(
+            row.state,
+            RowState::Read {
+                status: Some(Status::Open),
+                ..
+            }
+        );
+        // The state of the page of this session, opened from this
+        // computer's Walkr server.
+        let waiting = &self.walkr.waiting;
+        let page = waiting
+            .remote
+            .as_ref()
+            .filter(|remote| remote.machine.is_local() && remote.id == row.id)
+            .map(|remote| {
+                let host = waiting.local().map_or("", |host| host.label.as_str());
+                div()
+                    .text_size(px(self.config.ui.size - 1.))
+                    .text_color(rgb(theme.muted))
+                    .child(remote_line(&remote.state, host, true))
+            });
         div()
             .id(("walkr-row", index))
             .debug_selector(move || format!("walkr-row-{index}"))
@@ -235,14 +259,10 @@ impl SheprdWindow {
                         )
                     }),
             )
+            .children(page)
             .on_click(cx.listener(move |this, _, window, cx| {
-                this.walkr.sessions.choose(id.clone());
-                #[cfg(embedded_pages)]
-                if this.walkr.live_session() == Some(id.as_str()) {
-                    this.show_walkr_page(window, cx);
-                }
-                #[cfg(not(embedded_pages))]
-                let _ = window;
+                this.walkr.waiting.unmatched = false;
+                this.pick_local_walkr_session(id.clone(), waits, window, cx);
                 cx.notify();
             }))
             .into_any_element()

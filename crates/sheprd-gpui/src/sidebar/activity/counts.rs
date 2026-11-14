@@ -2,8 +2,9 @@
 //! on the last tick, and from the orchestrator views the window holds, open
 //! pull requests, open issues, and open beads, the open critical and high Dependabot
 //! alerts, the automation scripts waiting for approval or after a failed
-//! run, and the servers this computer's user runs (`[sidebar]
-//! ports_count`). An item two views list, such as one repository open in two
+//! run, the servers this computer's user runs (`[sidebar]
+//! ports_count`), and the Walkr pages that wait for a pick on the counted
+//! hosts. An item two views list, such as one repository open in two
 //! workspaces, counts once. Each count keeps when its newest item last
 //! changed, which the bar compares with when the section was last open.
 
@@ -25,6 +26,7 @@ pub(super) struct Counts {
     security: Count,
     automations: Count,
     ports: Count,
+    walkr: Count,
 }
 
 /// How many items a bubble counts, and when the newest of them changed.
@@ -62,10 +64,8 @@ impl Counts {
     fn count(self, panel: ActivityPanel) -> Option<Count> {
         match panel {
             ActivityPanel::Overview => Some(self.needs),
-            ActivityPanel::Workspaces
-            | ActivityPanel::Usage
-            | ActivityPanel::Walkr
-            | ActivityPanel::Kanban => None,
+            ActivityPanel::Workspaces | ActivityPanel::Usage | ActivityPanel::Kanban => None,
+            ActivityPanel::Walkr => Some(self.walkr),
             ActivityPanel::Ports => Some(self.ports),
             ActivityPanel::PullRequests => Some(self.pull_requests),
             ActivityPanel::Issues => Some(self.issues),
@@ -116,6 +116,10 @@ impl SheprdWindow {
                     0
                 },
                 latest: None,
+            },
+            walkr: Count {
+                items: self.walkr.waiting.total(),
+                latest: self.walkr.waiting.latest(),
             },
             ..Counts::default()
         };

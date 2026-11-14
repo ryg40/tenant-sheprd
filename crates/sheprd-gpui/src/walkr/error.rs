@@ -15,11 +15,6 @@ pub enum Error {
     InvalidProbePath,
     #[error("walkr.url must be an HTTP or HTTPS address with no user info, query, or fragment")]
     InvalidUrl,
-    /// The icon is not listed: no run, no saved session, no `walkr.url`.
-    #[error(
-        "No Walkr run is connected and no saved session was found. An agent connects one with sheprd walkr connect."
-    )]
-    NotListed,
     // Native diagnostics may contain the run address. Keep their typed
     // causes for callers, but never include them in the display text.
     #[cfg(any(target_os = "macos", windows))]
@@ -41,6 +36,8 @@ pub enum Error {
         "64 panes hold this Walkr run already. Disconnect one of them, or close it, before another connects"
     )]
     TooManyPanes,
+    #[error(transparent)]
+    Waiting(#[from] super::waiting::Error),
     /// The probe worker or the saved-session reader could not start.
     #[error("Could not start a background thread for Walkr")]
     Worker(#[source] std::io::Error),

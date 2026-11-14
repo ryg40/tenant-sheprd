@@ -2,7 +2,7 @@
 //! and panes that their daemon no longer lists.
 use super::run::{Connected, Disconnected, Pane, Parsed};
 use crate::{SheprdWindow, sidebar::ActivityPanel};
-use gpui::{AppContext as _, Context, Window};
+use gpui::{Context, Window};
 use std::time::Instant;
 
 impl SheprdWindow {
@@ -40,26 +40,6 @@ impl SheprdWindow {
         }
         cx.notify();
         Ok(connected)
-    }
-
-    /// Starts a check of the saved sessions when one is due. The directory
-    /// is read on the background executor, never here or in render.
-    pub(crate) fn check_walkr_history(&mut self, cx: &mut Context<Self>) {
-        if !self.walkr.take_history_check() {
-            return;
-        }
-        let check = cx.background_spawn(async {
-            crate::config::home().is_ok_and(|home| super::history::has_sessions(&home))
-        });
-        cx.spawn(async move |this, cx| {
-            let found = check.await;
-            let _ = this.update(cx, |this, cx| {
-                if this.walkr.history_checked(found) {
-                    cx.notify();
-                }
-            });
-        })
-        .detach();
     }
 
     pub(crate) fn disconnect_walkr(&mut self, pane: &Pane, cx: &mut Context<Self>) -> Disconnected {

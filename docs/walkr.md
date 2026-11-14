@@ -9,28 +9,152 @@ Walkr on the activity bar or run `sheprd ui panel walkr` to show the section.
 
 ## When the icon shows
 
-The Walkr icon is last on the activity bar while one of these is true:
+The Walkr icon is last on the activity bar whenever the activity bar is on
+(`[sidebar] activity_bar`). `sheprd ui panel walkr` then always shows the
+section.
 
-- A run exists: live, or ended with its page kept.
-- This computer has a saved Walkr Compare session.
-- `walkr.url` is set.
+### The count
 
-A saved session is a directory under
-`~/.local/.walkr/compare/sessions` whose name is a session ID, for example
-`20261101T120000Z-0123456789ab`. The home is the one Sheprd uses for its own
-files: `HOME`, or `USERPROFILE` on Windows. A worker thread checks the folder
-when a window opens, each time the section is shown, and after a run
-connects, ends or is dropped. The check reads at most 5,000 entries of the
-folder and opens no file. A symlink does not count, as the folder or as an
-entry. The check goes by path: a program of the same user that swaps the
-folder for a symlink while it runs can show the icon, and nothing more.
-Another root that Walkr can use is not read.
+A badge on the icon gives the number of pages that wait for a pick on every
+counted host. It shows nothing at 0 and `99+` above 99, as the other counts
+of the bar do. It is in the accent color while it holds a page made since
+the section was last open.
 
-The list and the detail do not trust this check. They verify each opened
-record; see [History](#history) for the platform checks and remaining races.
+- **What counts:** each saved Compare session whose `status` is `open`.
+  A live run counts through its session: Sheprd's probe asks the run's
+  server for `/sdk.js` only, so Sheprd does not know whether an agent waits
+  for feedback, and a run is not counted on its own.
+- **Which hosts:** this computer, and each SSH host that the window shows
+  (an enabled host whose daemon is connected). A cloud machine, WSL or a
+  socket endpoint is not counted.
+- **What is read:** `status`, `createdAt` and `title` of each record, and
+  `repo.name` of the newest waiting one. The bounds are those of the
+  list: at most 5,000 entries of the sessions folder, whatever they hold,
+  no symlink as a folder or a record, and no record over 16 MiB. A row
+  reads the first 8 KiB of its record; `repo.name` comes from the first
+  64 KiB of an `open` record. A record that is refused or malformed is
+  skipped, and the others still count. On an SSH host, a record with a
+  text field that has no UTF-8 form (a lone surrogate escape) is skipped
+  too. A full list of 5,000 sessions counts all 5,000.
+- **How:** each host has a reader thread of its own. This computer is read
+  from the file system with the checks of [History](#history). An SSH host
+  runs one read-only Python program, sent on standard input to
+  `python3 -I -` through the host's own shell and SSH connection, the one
+  Automations uses, so no file is written on the host. On the host, it
+  opens the real path of the home (a home that is a symlink is read, as on
+  this computer), then each folder down to the sessions folder and each
+  session folder, relative to the folder handle before it with
+  `O_NOFOLLOW`. It opens each record with `O_NOFOLLOW` and `O_NONBLOCK`,
+  and checks on the opened handle that it is a regular file within
+  16 MiB. It sends only `sessionId`, `status`, `createdAt`, `title` (at
+  most 200 characters) and `repo.name` (at most 100), and an end line.
+  Sheprd checks each line again: a line it does not know, or a list
+  without its end line, fails the read. A host without `python3` fails
+  its read, and the section says so; nothing is installed.
+- **Time:** a read of this computer has 5 seconds. A read of an SSH host
+  has 20 seconds in all: output, on standard output or standard error,
+  does not give it more time. The program on the host also ends itself
+  after 15 seconds with an alarm signal, wherever it waits, and Sheprd
+  shows that as a read that did not end in time.
+- **When:** when a window opens, every 60 seconds, when the section shows,
+  and when a run connects or ends. A host joins the count at the next of
+  these.
+- **Failures:** no sessions folder counts 0. A host whose read fails keeps
+  its last count, also when its sessions folder cannot be read. The
+  section shows the failure on the line of that host, never on the badge.
 
-When none of the three is true, the icon leaves the bar. A window that showed
-the section shows Workspaces, and `sheprd ui panel walkr` exits 8.
+The list in the section starts with one line for each counted host and its
+count. The waiting sessions of an SSH host follow its line, with their
+title and time.
+
+### A click on the icon
+
+With a count of 0, a click shows the section, as before.
+
+With a count above 0, a click goes to the newest waiting page of all hosts,
+by `createdAt`:
+
+1. **The workspace.** For the session of the live run, a workspace of this
+   computer that holds a pane of the run. For any other session, a
+   workspace on the same host whose checkout has the repository name of
+   `repo.name`. The repository name is the folder that holds the
+   checkout's Git directory. Of several, the one its host shows wins, else
+   the first in sidebar order (the hosts as the sidebar lists them, and a
+   repository's linked worktrees after its checkout). A workspace of
+   another host never matches.
+2. The window goes to that workspace and shows the Walkr section.
+3. **The page.** A session of this computer is picked in the list, as a
+   click of its row does: the section shows the run's page when the
+   session is live, and opens it again after Close or the idle limit.
+   With no live run, the section opens the session's page from the Walkr
+   server of this computer; see
+   [The page of a waiting session](#the-page-of-a-waiting-session). A
+   session of an SSH host opens its page in the section the same way,
+   through an SSH tunnel.
+
+When no workspace matches, the workspace stays and the section says that
+no workspace matched.
+
+### The page of a waiting session
+
+A click on the icon, or on a waiting session in the list, opens that
+session's page in the Walkr section. This is a session of an SSH host, or
+a session of this computer when no live run is connected. The session of
+a live run shows the run's page instead, as before. A session that does
+not wait for a pick (picked, or of another status) shows as text, as
+before. A session of this computer keeps its text while its page opens,
+and when the page cannot open.
+
+1. The host's reader program reads the record of the Walkr server of that
+   home, `~/.human-review/server.json`, with the same no-follow and
+   regular-file checks, at most 64 KiB. It needs its `port`, its `token`,
+   an integer `pid`, and `protocol` 9; else no request is sent.
+   `HUMAN_REVIEW_STATE_DIR` is not read.
+2. It asks that server on `127.0.0.1` for `/health` without the token.
+   The answer must be Walkr's, with the `pid` and the `protocol` (9) of the
+   record; else the token is not sent. Then it asks, with the token, for
+   its capabilities and for the path of its private Compare page. These are
+   `GET` requests only. The server must serve the Compare folder of that
+   home (`~/.local/.walkr/compare`). The token stays on the host: the
+   program sends Sheprd only the page address with the session ID as its
+   fragment. On this computer, the same program runs through this
+   computer's shell.
+3. Sheprd accepts the address only when it is `http` on `127.0.0.1`,
+   `localhost` or `[::1]`, with a port and no user info, within 2,048
+   bytes, on the page path, and its fragment is the session's ID.
+4. On this computer, Sheprd shows the page at that address on
+   `127.0.0.1`, with no tunnel. On an SSH host, Sheprd opens an SSH tunnel
+   from the same port number on this computer
+   to that port on the host (`ssh -N -L`, as a listening port of an SSH
+   host opens), and shows the page through it. The Walkr server answers
+   only a loopback `Host` with its own port, so the local port must be the
+   host's port. When that port is busy on this computer, Sheprd opens no
+   page, and the section names the busy port.
+   The tunnel belongs to the page: it closes with Close, the idle limit,
+   another page in the section, or the window.
+
+The address holds the secret of that server run. Sheprd keeps it in memory
+only, as the address of a run: no log, no tab, no file, and no message
+names more than the port. Sheprd never starts, stops or writes to a Walkr
+server. A missing server record, a server that does not answer or that
+serves another folder, a host without `python3`, a busy local port, or a
+tunnel that does not open gives a line under the session in the section,
+and no page. A build that draws no pages says so.
+
+On Windows, the page of a session of this computer does not open:
+Windows has no `/bin/sh` for the reader program. The session's row says
+so, and the session shows as text. The page of a session of an SSH host
+opens on Windows as on other systems.
+
+A run that connects closes the page and shows the run's page. When the
+closed page was of this computer, open or still opening, its session is
+no longer picked, so the section does not fall back to that session's
+text. After a page that failed, the picked session's text stays. A click
+of a session that does not wait also closes the page, and shows that
+session as text.
+
+No command opens this page. `sheprd walkr status` already counts the
+waiting sessions, and an agent on the host has the page's link.
 
 With nothing connected and no `walkr.url`, the section is a normal place,
 not an error. The header says **No Walkr run is connected**. The body says
@@ -64,8 +188,8 @@ created, changed or deleted: the section only reads them.
   checked folder before the record opens. Unix trusts the home path itself.
   On both platforms, another program can move an opened folder or change
   file contents during a read. All resulting content stays bounded and
-  appears as text only. The icon and directory listing still check by path;
-  neither can authorize a record read.
+  appears as text only. The directory listing still checks by path; it
+  cannot authorize a record read.
 - A row reads at most the first 8 KiB of its record. Walkr writes the
   identity, the times, the status and the title first, so the prefix holds
   them.
@@ -81,6 +205,9 @@ created, changed or deleted: the section only reads them.
 - Each read has a time limit: 5 seconds for the list, 10 seconds for one
   session. A read that is over is dropped, and the list or the content says
   that it could not be read in time.
+
+The checks of this section apply to the count of this computer too. An
+SSH host has its own reader; see [The count](#the-count).
 
 Each window reads on a thread of its own, never on the UI thread. The thread
 runs while the section shows or a `walkr status` call asks. The list is read
@@ -109,7 +236,11 @@ When the server stops, the mark goes after the next probe. After the last
 `disconnect` it goes at once.
 
 A pick of a live row shows the page of the run, reopening it after Close
-or the idle limit. A pick of another row shows the session as plain text:
+or the idle limit. A pick of a waiting row of this computer, with no live
+run, opens its page; see
+[The page of a waiting session](#the-page-of-a-waiting-session). A pick
+of another row that does not wait, or of any row while another run is
+live, shows the session as plain text:
 the brief, the questions and answers, each
 option, the pick, the comments, the note, the outcome and the ratings.
 No link is active, no Markdown or HTML is drawn, and nothing is opened or
@@ -210,7 +341,7 @@ The header of a run has a **Close** button while its page is open.
 | Run | After Close, or after 2 idle hours |
 | --- | --- |
 | Live | The page closes. The run stays, the header keeps **Live**, and **Show page** loads the page again. A new `connect` for the run does too. |
-| Ended | The page closes, and the run and its address are forgotten. The section shows `walkr.url` if it is set, else the saved sessions; with neither, the icon leaves the bar. |
+| Ended | The page closes, and the run and its address are forgotten. The section shows `walkr.url` if it is set, else the saved sessions. |
 
 A page is idle when 2 hours pass with no activity. The clock runs whether the
 section shows or not. Activity is:
@@ -373,11 +504,9 @@ The open button is enabled only when Walkr answers. On page-enabled builds,
 switches to Workspaces. Without a focused workspace, Sheprd asks you to open
 one first. Other builds offer **Open in the system browser**.
 
-`sheprd ui panel workspaces` leaves the section. With no run and no saved
-session, removing `walkr.url` hides the icon and shows Workspaces, including
-when a saved window selected Walkr. With none of the three conditions of
-[When the icon shows](#when-the-icon-shows), `ui panel walkr` exits 8
-without changing the window.
+`sheprd ui panel workspaces` leaves the section. The icon stays on the bar
+with no run, no saved session and no `walkr.url`; see
+[When the icon shows](#when-the-icon-shows).
 Typing while the section shows does not send text to a hidden terminal.
 
 The section owns its page, so `sheprd browser list` does not list it.
@@ -398,8 +527,13 @@ workspace. [Run](#run) describes `connect` and `disconnect`.
 `walkr status` shows the state, host and port, the probe age, the source and
 the count of saved sessions. JSON contains `connectivity`, `address`,
 `checked_seconds_ago`, `embedded`, `source`, `live` and `sessions`.
-`sessions` holds one entry for each host, `{"host": "local", "count": N}`
-for this computer, where `count` is the number of listed rows (at most 100).
+`sessions` holds one entry for each counted host:
+`{"host": "local", "count": N, "waiting": W}` for this computer, then one
+for each SSH host with its SSH target as `host`. `count` is the number of
+listed rows (at most 100); for an SSH host it is the number of records read,
+at most 100. `waiting` is the number of sessions that wait for a pick; see
+[The count](#the-count). An SSH host that has not answered yet is not
+listed, and one whose read fails keeps its last counts.
 It holds no title or text of a session. A status call reads the list when
 the last one is older than 60 seconds, within the same seven seconds. `source` is `run`, `override` (the `walkr.url`
 setting), or `none` when there is neither. `live` is true only

@@ -252,7 +252,6 @@ fn a_page_closes_after_two_hours_without_activity_shown_or_hidden(cx: &mut gpui:
         view.poll_walkr_page(moved + IDLE_CLOSE, window, cx);
         assert!(!view.browser.pages.contains(TabId::WALKR));
         assert!(view.walkr.run().is_none());
-        assert!(!view.activity_panel_listed(ActivityPanel::Walkr));
     });
 }
 
@@ -304,6 +303,5 @@ fn close_keeps_a_live_run_with_show_page_and_forgets_an_ended_one(cx: &mut gpui:
             !shown.contains("4100") && !shown.contains("INVENTED"),
             "{shown}"
         );
-        assert!(!view.activity_panel_listed(ActivityPanel::Walkr));
     });
 }

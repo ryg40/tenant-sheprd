@@ -41,7 +41,8 @@ pub enum Placement {
 /// 21: `orchestrator` `board` includes per-lane Done history coverage.
 /// 22: `ports prune` asks to stop the servers whose panes are closed.
 /// 23: `orchestrator` `board move` opens native confirmation, never approves it.
-pub const PROTOCOL_VERSION: u32 = 23;
+/// 24: walkr status sessions give the waiting count of each counted host.
+pub const PROTOCOL_VERSION: u32 = 24;
 
 /// Older apps and clients know only tabs, so a tab is left off the wire.
 fn is_tab(placement: &Placement) -> bool {

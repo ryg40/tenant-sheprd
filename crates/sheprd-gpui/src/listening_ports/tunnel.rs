@@ -115,6 +115,11 @@ impl Tunnel {
         }
     }
 
+    /// The local port it forwards.
+    pub(crate) fn local(&self) -> u16 {
+        self.local
+    }
+
     /// Whether the child is still forwarding. Never blocks.
     fn alive(&self) -> bool {
         self.attempt

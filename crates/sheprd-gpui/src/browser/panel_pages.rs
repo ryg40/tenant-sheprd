@@ -10,7 +10,8 @@ use gpui::{Context, Window};
 use std::time::Instant;
 
 impl SheprdWindow {
-    /// Makes the page for the run, else for `walkr.url`. A page is made for
+    /// Makes the page for the remote page of a waiting session, else the
+    /// run, else `walkr.url`. A page is made for
     /// one address and never loads another: a newer address of the run gets
     /// a new page. The address of a run goes to the engine in an [`Address`],
     /// whose `Debug` shows host and port only: it reaches no tab, no store,
@@ -24,6 +25,10 @@ impl SheprdWindow {
             return Ok(());
         };
         let address = match (&source, self.walkr.run()) {
+            (PageOf::Remote(_), _) => match self.walkr.waiting.remote_page() {
+                Some((page, _)) => page.address().clone(),
+                None => return Ok(()),
+            },
             (PageOf::Run(_), Some(run)) => run.address().clone(),
             (PageOf::Override(url), _) => Address::from(url.clone()),
             (PageOf::Run(_), None) => return Ok(()),

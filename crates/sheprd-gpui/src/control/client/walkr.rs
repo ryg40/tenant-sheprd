@@ -104,14 +104,22 @@ fn status(context: &Context) -> crate::Result<Output> {
     Output::data(format!("{state}\n{age}{source}{saved}"), &status)
 }
 
-/// One line for each host with its count of saved sessions. The count
-/// only: the app sends no title or text of a session.
+/// One line for each host with its counts of saved sessions and of those
+/// that wait for a pick. Counts only: the app sends no title or text of a
+/// session.
 fn sessions_text(sessions: &[HostSessions]) -> String {
     sessions
         .iter()
-        .map(|host| match host.host.as_str() {
-            "local" => format!("\nSaved Compare sessions on this computer: {}", host.count),
-            name => format!("\nSaved Compare sessions on {name}: {}", host.count),
+        .map(|host| {
+            let (count, waiting) = (host.count, host.waiting);
+            match host.host.as_str() {
+                "local" => format!(
+                    "\nSaved Compare sessions on this computer: {count}, waiting for a pick: {waiting}"
+                ),
+                name => format!(
+                    "\nSaved Compare sessions on {name}: {count}, waiting for a pick: {waiting}"
+                ),
+            }
         })
         .collect()
 }

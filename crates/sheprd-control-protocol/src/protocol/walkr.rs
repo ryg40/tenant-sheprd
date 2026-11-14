@@ -129,10 +129,12 @@ pub struct Status {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct HostSessions {
-    /// `local` for this computer.
+    /// `local` for this computer, else the SSH target of the host.
     pub host: String,
     /// The listed rows: at most the newest 100.
     pub count: u32,
+    /// The sessions whose status is `open`: they wait for a pick.
+    pub waiting: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

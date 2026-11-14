@@ -10,6 +10,8 @@ mod resolver;
 pub(crate) mod run;
 mod section;
 pub(crate) mod sessions;
+pub(crate) mod waiting;
+mod waiting_view;
 mod window;
 mod worker;
 
@@ -46,6 +48,8 @@ const HOST_LIMIT: usize = 253;
 pub(crate) enum PageOf {
     /// The `walkr.url` setting.
     Override(crate::browser::WebUrl),
+    /// The page of a waiting session on an SSH host, with this serial.
+    Remote(u64),
     /// The run with this serial.
     Run(u64),
 }
@@ -59,13 +63,7 @@ pub(crate) struct Walkr {
     #[cfg(embedded_pages)]
     dismissed: bool,
     generation: u64,
-    /// A saved session was found in the last check of this computer.
-    has_sessions: bool,
     header: header::Header,
-    /// A check of the saved sessions runs on a worker now.
-    history_checking: bool,
-    /// A check of the saved sessions is due.
-    history_wanted: bool,
     last: Option<Update>,
     /// When the page last had activity; see `docs/walkr.md`.
     last_activity: Instant,
@@ -85,6 +83,8 @@ pub(crate) struct Walkr {
     pub(crate) sessions: sessions::Sessions,
     shown: bool,
     start_error: Option<Error>,
+    /// The pages that wait for a pick on every counted host.
+    pub(crate) waiting: waiting::Waiting,
     worker: Option<Worker>,
 }
 
@@ -97,11 +97,7 @@ impl Default for Walkr {
             #[cfg(embedded_pages)]
             dismissed: false,
             generation: 0,
-            has_sessions: false,
             header: header::Header::default(),
-            history_checking: false,
-            // A window checks once when it is built.
-            history_wanted: true,
             last: None,
             last_activity: Instant::now(),
             page: Page::default(),
@@ -117,6 +113,7 @@ impl Default for Walkr {
             sessions: sessions::Sessions::default(),
             shown: false,
             start_error: None,
+            waiting: waiting::Waiting::default(),
             worker: None,
         }
     }
@@ -229,11 +226,11 @@ impl Walkr {
         self.sessions.demand(until);
     }
 
-    /// The icon check and the list are due: the section showed, or a run
-    /// connected or ended.
+    /// The list and the waiting count are due: the section showed, or a
+    /// run connected or ended.
     fn want_history(&mut self) {
-        self.history_wanted = true;
         self.sessions.want_list();
+        self.waiting.want();
     }
 
     /// The session whose row is live; see [`sessions::live_session`].
@@ -242,11 +239,12 @@ impl Walkr {
     }
 
     /// Whether the content shows a saved session instead of the page: a
-    /// row is picked and it is not live.
+    /// row is picked, it is not live, and its page from this computer's
+    /// Walkr server is not open.
     pub(crate) fn detail_shown(&self) -> bool {
-        self.sessions
-            .pick()
-            .is_some_and(|pick| self.live_session() != Some(pick))
+        self.sessions.pick().is_some_and(|pick| {
+            self.live_session() != Some(pick) && !self.waiting.local_page_open(pick)
+        })
     }
 
     pub(crate) fn refresh(&mut self) {
@@ -305,6 +303,15 @@ impl Walkr {
         }
         self.active(now);
         self.want_history();
+        // The page of the run takes the place of a remote page. A page of
+        // this computer, open or opening, also drops its pick, so that the
+        // section shows the run's page and not that session's text.
+        if self.waiting.remote.as_ref().is_some_and(|remote| {
+            remote.machine.is_local() && !matches!(remote.state, waiting::RemoteState::Failed(_))
+        }) {
+            self.sessions.back();
+        }
+        self.waiting.close_remote();
         #[cfg(embedded_pages)]
         {
             self.dismissed = false;
@@ -385,31 +392,6 @@ impl Walkr {
         true
     }
 
-    /// Whether a check of the saved sessions is due and none runs. A `true`
-    /// is a promise of the caller to start one and report it to
-    /// [`Self::history_checked`].
-    pub(crate) fn take_history_check(&mut self) -> bool {
-        if !self.history_wanted || self.history_checking {
-            return false;
-        }
-        self.history_wanted = false;
-        self.history_checking = true;
-        true
-    }
-
-    /// The answer of a check of the saved sessions. Whether it changed.
-    pub(crate) fn history_checked(&mut self, found: bool) -> bool {
-        self.history_checking = false;
-        let changed = self.has_sessions != found;
-        self.has_sessions = found;
-        changed
-    }
-
-    /// Whether the last check found a saved session on this computer.
-    pub(crate) fn has_sessions(&self) -> bool {
-        self.has_sessions
-    }
-
     /// Whether the section has a page that did not fail.
     pub(crate) fn page_open(&self) -> bool {
         #[cfg(embedded_pages)]
@@ -436,6 +418,9 @@ impl Walkr {
     /// What a page of this window would be made for now.
     #[cfg(embedded_pages)]
     pub(crate) fn source(&self, config: &WalkrConfig) -> Option<PageOf> {
+        if let Some((_, serial)) = self.waiting.remote_page() {
+            return Some(PageOf::Remote(serial));
+        }
         match &self.run {
             Some(run) => Some(PageOf::Run(run.serial())),
             None => config.url.clone().map(PageOf::Override),
@@ -448,6 +433,9 @@ impl Walkr {
     pub(crate) fn page_origin(&self, config: &WalkrConfig) -> Option<crate::browser::WebUrl> {
         if !self.page_open() || self.page_for != self.source(config) {
             return None;
+        }
+        if let Some((page, _)) = self.waiting.remote_page() {
+            return Some(page.origin().clone());
         }
         match &self.run {
             Some(run) => Some(run.origin().clone()),
@@ -467,7 +455,10 @@ impl Walkr {
     /// the server is gone, and the page would only show its error.
     #[cfg(embedded_pages)]
     pub(crate) fn page_visible(&self) -> bool {
-        (self.run.is_none() || !section::failing(self.connectivity())) && !self.detail_shown()
+        (self.waiting.remote_page().is_some()
+            || self.run.is_none()
+            || !section::failing(self.connectivity()))
+            && !self.detail_shown()
     }
 
     /// Close, or the idle limit: the page is gone and none starts by itself.
@@ -475,6 +466,8 @@ impl Walkr {
     #[cfg(embedded_pages)]
     pub(crate) fn dismiss(&mut self) {
         let ended = self.run.as_ref().is_some_and(|run| !run.live());
+        // A remote page goes with its tunnel.
+        self.waiting.close_remote();
         self.page_closed();
         self.dismissed = !ended;
     }
@@ -546,7 +539,8 @@ impl Walkr {
             && self.config == *config
             && self.page_for.is_none()
             && self.page_error.is_none()
-            && section::can_open(self.connectivity())
+            // A remote page has no probe: its address was just read.
+            && (self.waiting.remote_page().is_some() || section::can_open(self.connectivity()))
     }
 
     pub(crate) fn age(&self, config: &WalkrConfig, now: Instant) -> Option<Duration> {

@@ -80,6 +80,23 @@ impl fmt::Debug for Parsed {
 }
 
 impl Parsed {
+    /// The address, secret included, for the section's page.
+    #[cfg(embedded_pages)]
+    pub(crate) fn address(&self) -> &Address {
+        &self.address
+    }
+
+    /// Scheme, host and port: what a load of its page is compared to.
+    #[cfg(embedded_pages)]
+    pub(crate) fn origin(&self) -> &WebUrl {
+        &self.origin
+    }
+
+    /// The session ID in the fragment, when it is one.
+    pub(crate) fn session(&self) -> Option<&str> {
+        self.session.as_deref()
+    }
+
     /// Host and port, for a reply.
     pub(crate) fn host(&self) -> String {
         self.origin.address()
@@ -235,6 +252,11 @@ impl Run {
             None => true,
         });
         self.panes.len() != before
+    }
+
+    /// The panes that hold the run, oldest first.
+    pub(crate) fn panes(&self) -> &[Pane] {
+        &self.panes
     }
 
     /// Whether a pane holds the run.

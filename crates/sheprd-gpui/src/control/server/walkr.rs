@@ -109,7 +109,10 @@ pub(super) struct Asked {
 }
 
 /// The saved sessions of this computer, once a list is fresh enough: one
-/// no older than a minute, else the one this request asked for.
+/// no older than a minute, else the one this request asked for, and the
+/// waiting count of each counted host as it last answered. This computer
+/// waits for the first answer of its reader; an SSH host that has not
+/// answered yet is not listed, and one whose reads fail keeps its last count.
 fn sessions(walkr: &mut Walkr, now: Instant, asked: &mut Asked) -> Option<Vec<HostSessions>> {
     let since = *asked.sessions.get_or_insert_with(|| {
         if walkr.sessions.fresh(now) {
@@ -122,11 +125,29 @@ fn sessions(walkr: &mut Walkr, now: Instant, asked: &mut Asked) -> Option<Vec<Ho
     if !walkr.sessions.listed_since(since) {
         return None;
     }
-    let count = u32::try_from(walkr.sessions.rows().len()).unwrap_or(u32::MAX);
-    Some(vec![HostSessions {
+    let local = walkr.waiting.local();
+    if local.is_some_and(|local| local.tally.is_none() && local.error.is_none()) {
+        return None;
+    }
+    let number = |count: usize| u32::try_from(count).unwrap_or(u32::MAX);
+    let local = local.and_then(|local| local.tally.as_ref());
+    let mut hosts = vec![HostSessions {
         host: "local".into(),
-        count,
-    }])
+        count: number(walkr.sessions.rows().len()),
+        waiting: number(local.map_or(0, |tally| tally.waiting)),
+    }];
+    hosts.extend(walkr.waiting.hosts().iter().filter_map(|host| {
+        let crate::automations::Machine::Ssh(target) = &host.machine else {
+            return None;
+        };
+        let tally = host.tally.as_ref()?;
+        Some(HostSessions {
+            host: target.clone(),
+            count: number(tally.sessions.min(crate::walkr::history::pending::KEPT)),
+            waiting: number(tally.waiting),
+        })
+    }));
+    Some(hosts)
 }
 
 /// One look of a waiting status request at its window: the answer once a

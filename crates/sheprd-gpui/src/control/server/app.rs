@@ -300,9 +300,6 @@ pub(super) fn ui(call: Call<UiOp>, cx: &mut App) -> Response {
                     crate::sidebar::ActivityPanel::Tasks => {
                         "No project in this window has a .beads folder".to_owned()
                     }
-                    crate::sidebar::ActivityPanel::Walkr => {
-                        crate::walkr::Error::NotListed.to_string()
-                    }
                     panel => format!(
                         "{} is turned off: [sidebar] {} = false",
                         panel.name(),

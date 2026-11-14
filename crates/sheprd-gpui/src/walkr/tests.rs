@@ -6,7 +6,6 @@ mod bounds;
 mod history_detail;
 mod history_list;
 mod history_live;
-mod history_root;
 #[cfg(embedded_pages)]
 mod page;
 mod paths;
@@ -14,6 +13,10 @@ mod probe;
 mod run;
 mod section;
 mod state;
+mod waiting_count;
+#[cfg(unix)]
+mod waiting_remote;
+mod waiting_target;
 
 impl Walkr {
     /// The section goes to `shown`, as a tick sees it, without a probe.

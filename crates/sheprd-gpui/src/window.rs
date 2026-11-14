@@ -781,7 +781,7 @@ impl SheprdWindow {
             cx.notify();
         }
         self.answer_prune(window, cx);
-        if self.update_walkr(cx) {
+        if self.update_walkr() {
             cx.notify();
         }
         #[cfg(feature = "azure")]

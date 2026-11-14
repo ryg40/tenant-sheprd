@@ -160,7 +160,9 @@ impl SheprdWindow {
         // The address of a run goes to no tab and no other program, so a
         // run has Close and Show page in place of an open button.
         #[cfg(embedded_pages)]
-        let close = (run.is_some() && self.walkr.page_open()).then(|| {
+        let close = ((run.is_some() || self.walkr.waiting.remote_page().is_some())
+            && self.walkr.page_open())
+        .then(|| {
             self.walkr_button("walkr-close", fl!("walkr-close").into(), true)
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.dismiss_walkr_page();

@@ -120,16 +120,32 @@ pub(crate) fn row(id: &str, record: impl Read) -> Row {
     if !named {
         return Row::new(id.to_owned(), RowState::Unreadable);
     }
-    let created = fields.created.as_deref().and_then(parse_time);
+    read_row(
+        id,
+        fields.created.as_deref(),
+        fields.status.as_deref(),
+        fields.title.as_deref(),
+        fields.workflow.as_deref(),
+    )
+}
+
+/// The row of session `id` from the fields its record names, which the
+/// caller checked to be a Compare record of this ID. Text is cut and
+/// cleaned here, as for every row.
+pub(crate) fn read_row(
+    id: &str,
+    created: Option<&str>,
+    status: Option<&str>,
+    title: Option<&str>,
+    workflow: Option<&str>,
+) -> Row {
     Row {
-        created: created.or_else(|| name_time(id)),
+        created: created.and_then(parse_time).or_else(|| name_time(id)),
         id: id.to_owned(),
         state: RowState::Read {
-            title: fields.title.map(|title| text::chars(&title, text::TITLE)),
-            status: fields.status.as_deref().map(Status::from),
-            workflow: fields
-                .workflow
-                .map(|workflow| text::chars(&workflow, text::TITLE)),
+            title: title.map(|title| text::chars(title, text::TITLE)),
+            status: status.map(Status::from),
+            workflow: workflow.map(|workflow| text::chars(workflow, text::TITLE)),
         },
     }
 }

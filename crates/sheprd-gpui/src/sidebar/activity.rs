@@ -9,9 +9,9 @@
 //! `herdr-automate` scripts and runs of every host (`crate::automations`),
 //! Ports every TCP port this computer's user listens on
 //! (`crate::local_ports`), Usage the plan limits of every host
-//! (`crate::usage::section`), and Walkr (`crate::walkr`), listed last and
-//! only while a run exists (live, or ended with its page kept), this
-//! computer has a saved Compare session, or `walkr.url` is set.
+//! (`crate::usage::section`), and Walkr (`crate::walkr`), listed last,
+//! whose count is the Compare sessions that wait for a pick on this computer
+//! and the SSH hosts the window shows, and whose click goes to the newest.
 //! `[sidebar] activity_bar = false` turns the bar off, and `[sidebar]
 //! automations = false` leaves Automations off it. With the bar on, the
 //! sidebar toggle sits at the end of the Workspaces title, and collapsing the
@@ -224,11 +224,6 @@ impl SheprdWindow {
         match panel {
             ActivityPanel::Automations => self.config.sidebar_style.automations,
             ActivityPanel::Tasks => self.activity.tasks_listed,
-            ActivityPanel::Walkr => {
-                self.walkr.run().is_some()
-                    || self.walkr.has_sessions()
-                    || self.config.walkr.url.is_some()
-            }
             _ => true,
         }
     }
@@ -502,7 +497,11 @@ impl SheprdWindow {
                 .role(Role::Tab)
                 .aria_selected(state == BarState::Selected)
                 .on_click(cx.listener(move |this, _, window, cx| {
-                    this.select_activity_panel(panel, window, cx);
+                    if panel == ActivityPanel::Walkr {
+                        this.click_walkr(window, cx);
+                    } else {
+                        this.select_activity_panel(panel, window, cx);
+                    }
                 }));
             tabs = tabs.child(button);
         }

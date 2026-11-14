@@ -83,7 +83,7 @@ impl SheprdWindow {
         self.local_ports.poll(shown, std::time::Instant::now())
     }
 
-    pub(crate) fn update_walkr(&mut self, cx: &mut Context<Self>) -> bool {
+    pub(crate) fn update_walkr(&mut self) -> bool {
         let shown = self.activity_section() == Some(crate::sidebar::ActivityPanel::Walkr)
             && self.mod_app().is_none();
         let panes = self.forget_walkr_panes();
@@ -91,8 +91,8 @@ impl SheprdWindow {
             .walkr
             .poll(shown, &self.config.walkr, std::time::Instant::now())
             || panes;
-        self.check_walkr_history(cx);
-        changed
+        // After the poll: a section that just showed asks for a read.
+        self.update_walkr_waiting() || changed
     }
 
     /// The machines background monitors watch: this one always, a remote

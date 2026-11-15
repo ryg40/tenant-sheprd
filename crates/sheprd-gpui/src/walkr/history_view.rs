@@ -26,7 +26,7 @@ pub(super) fn local_time(row_time: Option<chrono::DateTime<chrono::Utc>>) -> Str
     })
 }
 
-fn status_text(status: Status) -> Option<SharedString> {
+pub(super) fn status_text(status: Status) -> Option<SharedString> {
     match status {
         Status::Open => Some(fl!("walkr-row-open").into()),
         Status::Submitted => Some(fl!("walkr-row-submitted").into()),
@@ -50,7 +50,7 @@ fn error_text(error: &Error) -> SharedString {
 }
 
 /// Half stars as Walkr writes them, in stars: 7 is 3.5.
-fn stars(value: i64) -> String {
+pub(super) fn stars(value: i64) -> String {
     let whole = value.div_euclid(2);
     if value.rem_euclid(2) == 0 {
         whole.to_string()
@@ -103,7 +103,7 @@ impl SheprdWindow {
         let narrow = width > 0. && width < NARROW;
         let content = match (self.walkr.detail_shown(), self.walkr.sessions.pick()) {
             (true, Some(pick)) => fade_in(
-                self.walkr_detail(cx),
+                self.walkr_session_body(cx),
                 SharedString::from(format!("walkr-detail-{pick}")),
             ),
             _ => fade_in(
@@ -220,7 +220,9 @@ impl SheprdWindow {
         let page = waiting
             .remote
             .as_ref()
-            .filter(|remote| remote.machine.is_local() && remote.id == row.id)
+            .filter(|remote| {
+                remote.machine.is_local() && remote.id.as_deref() == Some(row.id.as_str())
+            })
             .map(|remote| {
                 let host = waiting.local().map_or("", |host| host.label.as_str());
                 div()
@@ -266,6 +268,44 @@ impl SheprdWindow {
                 cx.notify();
             }))
             .into_any_element()
+    }
+
+    /// The picked session in the section's page once it loaded its
+    /// document, else as plain text.
+    fn walkr_session_body(&self, cx: &mut Context<Self>) -> Div {
+        #[cfg(embedded_pages)]
+        if let Some(page) = self.walkr_session_element() {
+            return div()
+                .size_full()
+                .flex()
+                .flex_col()
+                .child(div().flex_1().min_h_0().min_w_0().child(page));
+        }
+        self.walkr_detail(cx)
+    }
+
+    /// Show earlier ratings, while the detail has more than it shows.
+    pub(super) fn walkr_earlier_ratings(&self, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
+        let Some(Shown::Detail(detail)) = self.walkr.sessions.detail() else {
+            return None;
+        };
+        if detail.ratings.len() >= detail.ratings_total {
+            return None;
+        }
+        let enabled = !self.walkr.sessions.loading_detail();
+        Some(
+            self.walkr_button(
+                "walkr-earlier-ratings",
+                fl!("walkr-earlier-ratings").into(),
+                enabled,
+            )
+            .when(enabled, |button| {
+                button.on_click(cx.listener(|this, _, _, cx| {
+                    this.walkr.sessions.earlier_ratings();
+                    cx.notify();
+                }))
+            }),
+        )
     }
 
     /// The picked session as plain text, or why it is not shown.
@@ -474,22 +514,7 @@ impl SheprdWindow {
                         .child(div().child(fl!("walkr-detail-rating", stars = stars(rating.value))))
                         .children(rating.note.clone().map(|note| self.walkr_muted(note)))
                 }))
-                .when(detail.ratings.len() < detail.ratings_total, |body| {
-                    let enabled = !self.walkr.sessions.loading_detail();
-                    body.child(
-                        self.walkr_button(
-                            "walkr-earlier-ratings",
-                            fl!("walkr-earlier-ratings").into(),
-                            enabled,
-                        )
-                        .when(enabled, |button| {
-                            button.on_click(cx.listener(|this, _, _, cx| {
-                                this.walkr.sessions.earlier_ratings();
-                                cx.notify();
-                            }))
-                        }),
-                    )
-                })
+                .children(self.walkr_earlier_ratings(cx))
         })
     }
 }

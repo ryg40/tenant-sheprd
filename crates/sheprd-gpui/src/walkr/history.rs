@@ -11,12 +11,13 @@ mod open;
 pub(crate) mod pending;
 mod text;
 
+#[cfg(test)]
+pub(crate) use detail::parse;
 pub(crate) use detail::{Detail, OptionBody, RATINGS_PAGE, detail};
 pub(crate) use error::Error;
 pub(crate) use list::{Row, RowState, Status, list, read_row};
 #[cfg(test)]
 pub(super) use {
-    detail::parse,
     list::{PREFIX, row},
     open::Deadline,
 };

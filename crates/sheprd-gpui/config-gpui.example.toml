@@ -526,6 +526,19 @@ size = 12
 # [px0]
 # url = "http://127.0.0.1:7777/"
 
+# An artifact server's page (http or https). While url is set, or while the
+# artifacts program of the tenant-pi kit is installed (on PATH or in
+# ~/.local/bin, Linux and macOS only), the activity bar shows an Artifacts
+# button beside Settings. With the program, a click reads its status and
+# opens the page; Sheprd starts a stopped local server only after you say yes.
+# A url of another origin than the program's page wins. A loopback address
+# such as 127.0.0.1 is the computer where Sheprd runs. The page opens as a
+# browser tab: in the window on macOS, Windows, and a Linux build with the
+# servo feature, in the system browser elsewhere. Settings > Sidebar edits
+# this value.
+# [artifacts]
+# url = "http://127.0.0.1:8080/"
+
 # How chat views draw: "timeline" (entries on a line with avatars), "bubbles"
 # (your messages in bubbles on the right, like Claude's app), "terminal"
 # (Claude Code's own screen, in the terminal font), "document" (each prompt

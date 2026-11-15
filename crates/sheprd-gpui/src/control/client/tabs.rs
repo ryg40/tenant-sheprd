@@ -163,6 +163,9 @@ pub(super) fn orchestrator(
         OrchestratorCommand::BoardOrder { lane, before } => {
             super::kanban::order(lane, before, context)
         }
+        OrchestratorCommand::BoardRank { lane, items } => super::kanban::rank(lane, items, context),
+        OrchestratorCommand::Repos => super::repos::list(context),
+        OrchestratorCommand::ReposSet { keys } => super::repos::set(keys, context),
         OrchestratorCommand::Open { repo } => {
             let repo = repo.as_deref().map(local_folder).transpose()?;
             let response = context.call(Request::Tab, TabOp::Orchestrator { repo })?;

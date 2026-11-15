@@ -75,11 +75,19 @@ pub(crate) fn moved(
     Ok(next)
 }
 
+/// The local orders a window keeps: lanes, and each lane's order of
+/// implementation. One save path and one set of failure rules hold both.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Keys {
+    pub(crate) lanes: Vec<LaneKey>,
+    pub(crate) ranks: super::rank::Ranks,
+}
+
 /// Window-owned Chrome state, independent of any filtered board or pending drag.
 #[derive(Default)]
 pub(crate) struct Stored {
     pub(crate) failed: Cell<bool>,
-    pub(crate) keys: Vec<LaneKey>,
+    pub(crate) keys: Keys,
     pub(crate) loaded: bool,
     /// User choice alone decides precedence over a late initial load.
     pub(crate) modified: bool,
@@ -89,7 +97,7 @@ pub(crate) struct Stored {
 }
 
 impl Stored {
-    pub(crate) fn restore(&mut self, keys: Vec<LaneKey>) {
+    pub(crate) fn restore(&mut self, keys: Keys) {
         if !self.modified {
             self.keys = keys;
         }
@@ -100,28 +108,32 @@ impl Stored {
 impl OrchestratorView {
     pub(crate) fn set_lane_order(
         &mut self,
-        keys: &[LaneKey],
+        keys: &Keys,
         authoritative: bool,
         cx: &mut Context<Self>,
     ) {
         if self.kanban.order_dirty && self.kanban.order_chosen {
             return;
         }
-        if self.kanban.applied_order != keys || self.kanban.authoritative != authoritative {
+        if self.kanban.applied_order != *keys || self.kanban.authoritative != authoritative {
             self.kanban.order_dirty = false;
-            self.kanban.applied_order = keys.to_vec();
-            self.kanban.order = keys.to_vec();
+            self.kanban.applied_order = keys.clone();
+            self.kanban.order = keys.lanes.clone();
+            self.kanban.ranks = keys.ranks.clone();
             self.kanban.authoritative = authoritative;
             self.kanban.invalidate();
             self.prepare_kanban(cx);
         }
     }
 
-    pub(crate) fn take_lane_order(&mut self) -> Option<(Vec<LaneKey>, bool)> {
+    pub(crate) fn take_lane_order(&mut self) -> Option<(Keys, bool)> {
         std::mem::take(&mut self.kanban.order_dirty).then(|| {
-            self.kanban.applied_order = self.kanban.order.clone();
+            self.kanban.applied_order = Keys {
+                lanes: self.kanban.order.clone(),
+                ranks: self.kanban.ranks.clone(),
+            };
             (
-                self.kanban.order.clone(),
+                self.kanban.applied_order.clone(),
                 std::mem::take(&mut self.kanban.order_chosen),
             )
         })
@@ -152,6 +164,11 @@ impl OrchestratorView {
         }
         if self.kanban.prepared != Some(self.kanban.revision) {
             return Err(error::Error::Pending);
+        }
+        // A hidden lane stays in the roster, so its saved place is kept,
+        // but neither it nor a place before it is a target.
+        if !self.lane_shown(lane) || before.is_some_and(|before| !self.lane_shown(before)) {
+            return Err(error::Error::UnknownLane);
         }
         let ready = self.kanban.ready.as_ref().ok_or(error::Error::Pending)?;
         let next = moved(&self.kanban.order, &ready.roster, lane, before)?;
@@ -196,6 +213,7 @@ impl OrchestratorView {
             .ready
             .as_ref()
             .is_some_and(|ready| ready.roster.contains(&drag.lane))
+            || !self.lane_shown(&drag.lane)
         {
             return Err(error::Error::UnknownLane);
         }

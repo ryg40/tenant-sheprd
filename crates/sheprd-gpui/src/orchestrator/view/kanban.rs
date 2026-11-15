@@ -1,12 +1,16 @@
 //! A separate presentation and selection over the existing repository workers.
+mod card;
 mod dialog;
 pub(super) mod drag;
 pub(crate) mod error;
+mod face;
+mod hidden;
 mod history;
 mod menu;
 mod move_status;
 pub(crate) mod order;
 mod popup;
+pub(crate) mod rank;
 mod render;
 pub(super) mod rows;
 
@@ -20,7 +24,7 @@ use std::{collections::HashSet, sync::Arc};
 #[derive(Default)]
 pub(super) struct State {
     pub(super) account_ready: bool,
-    applied_order: Vec<sheprd_orchestrator::kanban::identity::LaneKey>,
+    applied_order: order::Keys,
     authoritative: bool,
     collapsed: HashSet<String>,
     pub(super) drag: drag::State,
@@ -39,13 +43,14 @@ pub(super) struct State {
     positions: Vec<Option<(usize, usize)>>,
     prepared: Option<u64>,
     preparing: Option<u64>,
+    pub(super) ranks: rank::Ranks,
     ready: Option<Arc<Prepared>>,
     removed: bool,
     removed_task: Option<Task<()>>,
     requested: bool,
     pub(super) revision: u64,
     save_failed: bool,
-    scroll: UniformListScrollHandle,
+    pub(super) scroll: UniformListScrollHandle,
     selected: Option<CardKey>,
     pub shown: bool,
     #[cfg(test)]
@@ -71,13 +76,14 @@ impl State {
         for (index, lane) in ready.lanes.iter().enumerate() {
             self.lines.push(rows::Line::Header(index));
             if !self.collapsed.contains(&lane.key.canonical()) {
+                self.lines.push(rows::Line::Facts(index));
                 let count = lane
                     .cells
                     .iter()
                     .map(Vec::len)
                     .max()
                     .unwrap_or_default()
-                    .max(5);
+                    .max(1);
                 for row in 0..count {
                     let line = self.lines.len();
                     self.lines.push(rows::Line::Cards { lane: index, row });
@@ -282,18 +288,21 @@ impl OrchestratorView {
                     }
                     _ => None,
                 },
+                live: self.live.clone(),
             })
             .collect();
         let revision = self.kanban.revision;
         let order = rows::LaneOrder {
             authoritative: self.kanban.authoritative && self.kanban.account_ready,
             keys: self.kanban.order.clone(),
+            ranks: self.kanban.ranks.clone(),
         };
         let mapping = self.kanban.mapping.clone();
         let filter = rows::Filter {
             query: self.query.clone(),
             projects: self.projects.clone(),
             backends: self.backends.clone(),
+            repos: self.repo_select.active().cloned(),
         };
         let selected = self.kanban.selected.clone();
         let previous = self.kanban.ready.clone();
@@ -311,6 +320,10 @@ impl OrchestratorView {
                             Ok(ready) => {
                                 if this.kanban.order != ready.order {
                                     this.kanban.order = ready.order.clone();
+                                    this.kanban.order_dirty = true;
+                                }
+                                if this.kanban.ranks != ready.ranks {
+                                    this.kanban.ranks = ready.ranks.clone();
                                     this.kanban.order_dirty = true;
                                 }
                                 if this.kanban.focused_lane.as_ref().is_some_and(|key| {
@@ -484,6 +497,13 @@ impl OrchestratorView {
             cx.stop_active_drag(window);
             window.focus(&self.focus, cx);
             cx.notify();
+            return true;
+        }
+        if event.keystroke.modifiers.alt
+            && event.keystroke.modifiers.shift
+            && matches!(event.keystroke.key.as_str(), "up" | "down" | "backspace")
+        {
+            self.step_rank(&event.keystroke.key, cx);
             return true;
         }
         if event.keystroke.modifiers.alt && matches!(event.keystroke.key.as_str(), "up" | "down") {

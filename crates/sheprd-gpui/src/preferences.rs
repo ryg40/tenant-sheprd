@@ -130,14 +130,20 @@ pub struct Chrome {
     /// The device IDs in the order the user dragged them into.
     pub device_order: Vec<String>,
     pub kanban_lane_order: Vec<LaneKey>,
+    /// Each Kanban lane's order of implementation, by native item ID.
+    pub kanban_ranks: crate::orchestrator::view::kanban::rank::Ranks,
     /// The mod panel's width, once dragged.
     pub mod_panel_width: Option<f32>,
     /// The notes panel's width, once dragged; `None` is its default.
     pub notes_width: Option<f32>,
+    /// The orchestrator's active repositories; `None` shows every one.
+    pub orchestrator_repos: Option<crate::orchestrator::view::repo_select::Selection>,
     /// The review's file list's width, once dragged.
     pub review_files_width: Option<f32>,
     pub sidebar_split: Option<f32>,
     pub sidebar_width: Option<f32>,
+    /// The Walkr sessions cleared out of the waiting count.
+    pub walkr_dismissed: crate::walkr::waiting::Dismissed,
     // keep-sorted end
 }
 
@@ -194,7 +200,13 @@ impl Preferences {
                     );
                 });
                 let _ = loaded_tx.send(chrome);
-                for save in requests {
+                for mut save in requests {
+                    // Another window on this endpoint saves to the same file:
+                    // its dismissals stay. A file that cannot be read adds
+                    // none.
+                    if let Ok(stored) = read_chrome(&path) {
+                        save.chrome.walkr_dismissed.merge(stored.walkr_dismissed);
+                    }
                     let result = write_chrome(&path, save.chrome);
                     if result.is_err() {
                         tracing::warn!(
@@ -343,11 +355,16 @@ fn read_chrome(path: &Path) -> crate::Result<Chrome> {
                 .filter_map(serde_json::Value::as_str)
                 .filter_map(order::parse),
         ),
+        kanban_ranks: kanban_ranks(object.get("kanban_ranks")),
         mod_panel_width: panel_width("mod_panel_width_px"),
         notes_width: panel_width("notes_width_px"),
+        orchestrator_repos: crate::orchestrator::view::repo_select::Selection::from_json(
+            object.get("orchestrator_repos"),
+        ),
         review_files_width: panel_width("review_files_width_px"),
         sidebar_split,
         sidebar_width,
+        walkr_dismissed: crate::walkr::waiting::Dismissed::from_json(object.get("walkr_dismissed")),
     })
 }
 
@@ -380,6 +397,28 @@ fn device_order(value: Option<&serde_json::Value>) -> Vec<String> {
         .take(MAX_DEVICES)
         .map(str::to_owned)
         .collect()
+}
+
+/// The stored orders of implementation. A malformed lane or ID is
+/// forgotten rather than failing the whole file; the reducer's bounds apply.
+fn kanban_ranks(
+    value: Option<&serde_json::Value>,
+) -> crate::orchestrator::view::kanban::rank::Ranks {
+    crate::orchestrator::view::kanban::rank::Ranks::bounded(
+        value
+            .and_then(serde_json::Value::as_object)
+            .into_iter()
+            .flatten()
+            .filter_map(|(lane, ids)| {
+                let ids = ids
+                    .as_array()?
+                    .iter()
+                    .filter_map(serde_json::Value::as_str)
+                    .map(str::to_owned)
+                    .collect();
+                Some((order::parse(lane)?, ids))
+            }),
+    )
 }
 
 /// Bounds on the stored device order: far more devices than anyone saves,
@@ -434,7 +473,14 @@ fn write_chrome(path: &Path, chrome: Chrome) -> crate::Result<()> {
                     .review_files_width
                     .filter(|width| width.is_finite() && *width > 0.0),
                 "device_order": chrome.device_order,
+                "orchestrator_repos": chrome.orchestrator_repos.as_ref().map(|selection| selection.to_json()),
                 "kanban_lane_order": order::bounded(chrome.kanban_lane_order).iter().map(LaneKey::canonical).collect::<Vec<_>>(),
+                "kanban_ranks": chrome
+                    .kanban_ranks
+                    .lanes()
+                    .map(|(lane, ids)| (lane.canonical(), serde_json::json!(ids)))
+                    .collect::<serde_json::Map<_, _>>(),
+                "walkr_dismissed": chrome.walkr_dismissed.to_json(),
             }),
         )?;
         file.write_all(b"\n")?;

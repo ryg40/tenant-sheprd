@@ -1,5 +1,6 @@
 //! Prepared controls for the standalone window; persistence belongs to its serial save path.
 // i18n: migrated
+pub(super) mod artifacts;
 pub(super) mod backdrop;
 pub(super) mod chat_env;
 pub(super) mod code;
@@ -196,6 +197,7 @@ impl SettingsWindow {
             .refresh_appearance(&self.config, &self.theme, cx);
         self.refresh_code_appearance(cx);
         self.sync_px0_field(cx);
+        self.sync_artifacts_field(cx);
         self.sync_chat_env_field(cx);
         self.sync_remote_fields(cx);
         if let Some(edit) = &self.number_edit {

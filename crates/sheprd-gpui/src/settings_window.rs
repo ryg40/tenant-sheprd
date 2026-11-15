@@ -168,6 +168,7 @@ struct SettingsWindow {
     plugins: controls::plugins::Plugins,
     code: controls::code::CodeSettings,
     px0: controls::px0::Px0Settings,
+    artifacts: controls::artifacts::ArtifactsSettings,
     chat_env: controls::chat_env::ChatEnvSettings,
     remote: pages::remote_control::RemoteSettings,
     /// The open override dropdown, if any; its list renders inside its button.
@@ -335,6 +336,7 @@ impl SettingsWindow {
             plugins: controls::plugins::Plugins::new(cx),
             code: Default::default(),
             px0: Default::default(),
+            artifacts: Default::default(),
             chat_env: Default::default(),
             remote: Default::default(),
             dropdown: None,
@@ -706,6 +708,9 @@ impl SettingsWindow {
         }
         if section == Section::General {
             self.open_chat_env_settings(cx);
+        }
+        if section == Section::Sidebar {
+            self.open_artifacts_settings(cx);
         }
         if section == Section::RemoteControl {
             self.open_remote_control(cx);

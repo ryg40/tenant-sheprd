@@ -54,6 +54,7 @@ fn history_deduplicates_open_observations_and_failed_reads_keep_the_last_sample(
         board_rows::prepare(
             vec![board_rows::Input {
                 account: None,
+                live: Default::default(),
                 snapshot,
                 worker: "history-worker".into(),
             }],
@@ -62,6 +63,7 @@ fn history_deduplicates_open_observations_and_failed_reads_keep_the_last_sample(
                 backends: Default::default(),
                 projects: Default::default(),
                 query: String::new(),
+                repos: None,
             },
             1,
             None,

@@ -19,10 +19,17 @@ impl OrchestratorView {
     }
 
     /// The projects the shown list could hold: for Tasks, those with Beads.
+    /// A checkout left out of the active repositories holds none.
     pub(super) fn projects_listing(&self) -> impl Iterator<Item = &Repo> {
         let tasks = self.tab == Tab::Tasks;
         self.projects_named()
             .filter(move |repo| !tasks || repo.has_beads())
+            .filter(|repo| {
+                repo.remote.is_some()
+                    || self
+                        .repo_select
+                        .shows(super::repo_select::checkout_identity(repo).as_deref())
+            })
     }
 
     /// Whether any project offers tasks, so the bar lists the section.
@@ -266,6 +273,25 @@ impl OrchestratorView {
             } else {
                 Vec::new()
             };
+            // Only active repositories list anything, before every other narrowing.
+            if self.repo_select.active().is_some() {
+                let own = super::repo_select::checkout_identity(repo);
+                let remote = repo.remote.is_some();
+                let select = &self.repo_select;
+                for rows in [&mut issues, &mut pulls, &mut tasks] {
+                    rows.retain(|row| {
+                        let source = &items[row.item].key.source;
+                        select.shows(
+                            if remote {
+                                Some(super::repo_select::identity(source))
+                            } else {
+                                own.clone()
+                            }
+                            .as_deref(),
+                        )
+                    });
+                }
+            }
             // A checkout lists its own repository's issues: an account leaves
             // them to it, so each shows once, with the checkout's actions.
             if repo.lists_account() {

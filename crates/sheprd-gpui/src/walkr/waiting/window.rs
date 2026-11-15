@@ -39,7 +39,34 @@ impl SheprdWindow {
             self.walkr.waiting.set_hosts(hosts);
             self.walkr.waiting.ask(now);
         }
-        self.walkr.waiting.take_answers()
+        let changed = self.walkr.waiting.take_answers();
+        // A complete read forgot a dismissed session.
+        self.save_walkr_dismissed();
+        changed
+    }
+
+    /// Clears every waiting session of every host out of the count and
+    /// the list, in Sheprd only. How many left the count.
+    pub(crate) fn clear_walkr_waiting(&mut self) -> usize {
+        let cleared = self.walkr.waiting.clear();
+        self.walkr.waiting.unmatched = false;
+        self.save_walkr_dismissed();
+        cleared
+    }
+
+    /// Session `id` of `machine` leaves the count and the list.
+    pub(crate) fn dismiss_walkr_waiting(&mut self, machine: &Machine, id: &str) {
+        self.walkr.waiting.dismiss(machine, id);
+        self.walkr.waiting.unmatched = false;
+        self.save_walkr_dismissed();
+    }
+
+    /// The chrome keeps a changed dismissed set; the save runs on the
+    /// preferences worker.
+    fn save_walkr_dismissed(&mut self) {
+        if self.walkr.waiting.take_dismissed_unsaved() {
+            self.save_chrome();
+        }
     }
 
     /// The window's workspaces on the hosts it can count, in sidebar order:
@@ -124,7 +151,7 @@ impl SheprdWindow {
             self.pick_local_walkr_session(id, true, window, cx);
         } else {
             self.walkr.sessions.back();
-            self.open_waiting_walkr_page(machine, id, window, cx);
+            self.open_waiting_walkr_page(machine, Some(id), window, cx);
         }
         cx.notify();
     }

@@ -70,6 +70,12 @@ impl SheprdWindow {
             {
                 live.push(crate::browser::TabId::WALKR);
             }
+            if self.activity_section() == Some(crate::sidebar::ActivityPanel::Walkr)
+                && self.mod_app().is_none()
+                && self.shows_walkr_session_page()
+            {
+                live.push(crate::browser::TabId::WALKR_SESSION);
+            }
             // A tab's zoom may change in any window, or from the command
             // line, so each window's pages follow the store as they show.
             if let Some(store) = super::store(cx) {

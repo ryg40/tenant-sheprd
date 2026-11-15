@@ -37,6 +37,7 @@ impl Page {
             Self::AgentSkill => fl!("menu-page-install-the-agent-skill"),
             Self::Application => fl!("menu-page-menu"),
             Self::AppUpdate | Self::Update => fl!("menu-page-update"),
+            Self::Artifacts => fl!("menu-page-artifacts"),
             Self::Automation => fl!("menu-page-automations"),
             Self::AzureDevOps => fl!("menu-page-azure-devops-tokens"),
             #[cfg(servo_pages)]

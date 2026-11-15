@@ -9,7 +9,7 @@ use crate::{
 };
 use gpui::{prelude::*, *};
 
-fn check_hue(look: &Look, state: CheckState) -> u32 {
+pub(super) fn check_hue(look: &Look, state: CheckState) -> u32 {
     match state {
         CheckState::Failed => look.hue(RED),
         CheckState::Pending => look.hue(YELLOW),

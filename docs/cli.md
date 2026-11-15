@@ -111,7 +111,10 @@ Sheprd** entry, which both Windows installers add, runs this command through
 | `orchestrator [--repo PATH]` | Show the Issues section narrowed to your checkout's project, or PATH's |
 | `orchestrator board [--cursor CURSOR]` | Read the targeted window's prepared Kanban board without focus, panel changes, or provider I/O. Exit 4 means pending or restart-required; an empty prepared board succeeds. The activity bar must be enabled (else exit 8). `--repo` and `--forgejo` refuse. |
 | `orchestrator board move ITEM --lane LANE --to open\|in-progress\|in-review\|done` | Open native exact-change confirmation for a Forgejo issue. Use canonical keys from board output; `--lane` is the current lane. Success means the dialog opened, not tracker acknowledgement. Exit 4: pending projection; 5: unknown keys; 6: busy or existing dialog; 8: unsupported card or disabled activity bar. `--yes`, `--force`, destination lanes, `--repo`, and `--forgejo` refuse. |
-| `orchestrator board order LANE [--before LANE]` | Move a known canonical lane before another, or to the end. Supports `--json` and `--window`. Saves local order asynchronously without tracker writes. Exit 4 means preparation is pending, 5 means an unknown lane/window, and 6 means a busy drag or dialog. `--repo`, `--forgejo`, and `--cursor` refuse. |
+| `orchestrator board order LANE [--before LANE]` | Move a known canonical lane before another, or to the end. Supports `--json` and `--window`. Saves local order asynchronously without tracker writes. Exit 4 means preparation is pending, 5 means an unknown lane/window or a lane the repository selection hides (as LANE or `--before`), and 6 means a busy drag or dialog. `--repo`, `--forgejo`, and `--cursor` refuse. |
+| `orchestrator board rank LANE [ITEM...]` | Set a lane's order of implementation: the canonical item keys from board output, first to build first, at most 100. No ITEM clears the lane's order. Board reads give each ranked, unsettled card its `rank` number. Supports `--json` and `--window`. Saves local order asynchronously without tracker writes. Exit 2 means an ITEM that is not canonical, repeats, or exceeds the bounds; 4 means preparation is pending; 5 means an unknown lane, item, or window, or a lane the repository selection hides; 6 means a busy drag or dialog. A refusal changes nothing. `--repo`, `--forgejo`, and `--cursor` refuse. |
+| `orchestrator repos [list]` | The repositories the targeted window's orchestrator lists, each with its canonical key, host, `active`, and `new` (listed since the selection was saved). At most 512 entries and 192 KiB of reply, with `truncated` past that. Lists what the workers have read; no provider I/O. Exit 8 without the activity bar. `--repo` and `--forgejo` refuse. |
+| `orchestrator repos set KEY... \| --all` | Show only the repositories KEY names in Pull requests, Issues, Tasks, and Kanban, or every repository (listed later too) with `--all`. Saves local preferences asynchronously. Exit 2: a malformed key, more than 512 keys, one over 1,024 bytes, or a selection that would keep more than 512 keys with the saved keys not listed now; exit 5: a key not listed now. Each refusal changes nothing. |
 | `orchestrator items\|issues\|prs\|tasks` | What it last synced, from its local database (no app needed); `tasks` is the repository's Beads tasks, with each one's assignee, priority, and blockers in `--json` |
 | `orchestrator issues --forgejo HOST` | The open issues of every repository the Forgejo token for HOST reads, as the Issues section last synced them (no app needed); HOST is the one `FORGEJO_HOST` names |
 | `review` | The review of your workspace's uncommitted changes |
@@ -210,7 +213,8 @@ not take it either.
 | `config reload` | Reread Herdr's config and this app's |
 | `walkr connect URL\|- [--show]` | Tell the [Walkr section](walkr.md#run) the page address of a Walkr server the calling pane started; `-` reads it from the first line of standard input. Only `http` on `127.0.0.1`, `localhost` or `[::1]` with a port, at most 2,048 bytes; else exit 2 and nothing changes. `--show` also shows the section; with the activity bar off (`[sidebar] activity_bar = false`) it exits 8 and connects nothing, as `ui panel` does. A run holds at most 64 panes: one more exits 6 and changes nothing. Sheprd shows, logs and keeps host and port only, and a usage error names no argument, because a misplaced one may be the address. Runs in a Herdr pane |
 | `walkr disconnect` | The calling pane no longer holds the run. The page stays until the user selects Close in the section or it is idle for 2 hours; no command closes it. Exit 0 also when the pane held no run |
-| `walkr status` | [Walkr connectivity](walkr.md), host and port, probe age, the source (`run`, `override`, or `none`), whether the run is live, and for this computer and each counted SSH host the count of saved Compare sessions and of those that wait for a pick (`sessions`). Exit 0 for a determined state, including unreachable; 4 (nothing yet, source `none`) if no run is connected and `walkr.url` is unset; 7 if no fresh probe answers within 7 seconds |
+| `walkr status` | [Walkr connectivity](walkr.md), host and port, probe age, the source (`run`, `override`, or `none`), whether the run is live, and for this computer and each counted SSH host the count of saved Compare sessions and of those that wait for a pick (not counting cleared ones), and whether a live Walkr server answers on that SSH host (`sessions`, `live_server`). Exit 0 for a determined state, including unreachable; 4 (nothing yet, source `none`) if no run is connected and `walkr.url` is unset; 7 if no fresh probe answers within 7 seconds |
+| `walkr clear` | Take every Compare session that waits for a pick out of the [Walkr count](walkr.md#clear) and waiting list of this window, as **Clear** in the section does, and answer how many left (`count`). In Sheprd only: no host and no session file changes, and the sessions stay in the history. A session that waits later counts again. Exit 0 also when nothing waited |
 | `theme [list]`, `theme set NAME` | The app theme. A device's terminal theme is `config set devices.ID.theme NAME`, with the ID from `host list` minus its `ssh:` prefix |
 | `font [list]`, `font set NAME`, `font reset` | |
 | `language [status]`, `language list`, `language set system\|TAG` | The language set and the locale Sheprd shows, the languages there are, each with its name in itself as Settings > General lists it, or save the `language` setting (a BCP 47 tag; `en-XA` and `en-XB` are pseudo-locales). Only `status` asks the app, and without it reports what it would show |
@@ -319,6 +323,47 @@ The change applies live; `config get focus_follows_mouse` reads it back.
 An unnamed tab shows its number. To show its agent's terminal title instead,
 run `sheprd config set tab_labels.agent_title true`.
 
+### Artifacts
+
+The activity bar shows an Artifacts button when `[artifacts] url` is set, or
+when the user's `artifacts` program is installed. The program comes from the
+tenant-pi kit, which links it as `~/.local/bin/artifacts`; it is not part of
+Sheprd. Sheprd looks for it on `PATH`, then in `~/.local/bin`, once at start
+and on each config reload, off the UI thread, and runs nothing then. Sheprd
+looks for it only on Linux and macOS: on Windows the program is never found,
+the button needs `[artifacts] url`, and `sheprd artifacts status`, `start`,
+and `off` exit 8.
+
+A click with the program reads `artifacts --json status` in the background,
+and the button pulses meanwhile. A server that answers (`running` or
+`remote`) opens its page. A stopped local server opens Sheprd's question
+"Start the artifact server?" with the page address and the program file that
+runs; only **Start** runs `artifacts start`, then that same page opens. Any
+other state, or a failed run, shows a short reason. Without the program, a
+click opens `url` as before.
+
+The setting wins. The program decides the click only when `[artifacts] url`
+is unset, or when the setting and the program's page have the same origin
+(scheme, host, and port); the setting's page is then the one asked about and
+opened. Otherwise, and when the program is not set up, does not answer, or
+fails, a click opens the setting as before (a failure also flashes its
+reason). A loopback address such as `http://127.0.0.1:6790/browse` names the computer
+where Sheprd runs. Sheprd starts the server only after a yes, never by itself,
+and leaves it running when it quits.
+
+`sheprd config set artifacts.url https://example.com/` sets the page;
+`config unset artifacts.url` removes it.
+
+| Command | What it does |
+| --- | --- |
+| `artifacts [status]` | The state (`running`, `stopped`, `remote`, `unreachable`, or `unconfigured`) and the page of the server it describes: the program's page, or `[artifacts] url` when the program names none. When the button opens another page (`[artifacts] url` set to it), the answer names that page too (`--json`: `opens`). Exits 8 when the program is not installed, and always on Windows, where Sheprd does not look for it |
+| `artifacts open` | Open the page in the window when the server answers, as the button does. Starts nothing; exits 1 when the server is stopped |
+| `artifacts start` | Open Sheprd's question to start the local server whenever the program reports it `stopped`, also when `[artifacts] url` names another server; the user confirms there and the page of the started server then opens (the setting's page when it names that server). Answers at once, as `ports prune` does; exits 6 while a dialog is open |
+| `artifacts off` | Open Sheprd's question to stop the local server (`artifacts off`); the user confirms there. Answers at once; exits 6 while a dialog is open |
+
+Each waits at most 20 seconds for the program's status. Only one run of the
+program goes on at a time in the app: a request during another exits 6.
+
 ### Remote control
 
 | Command | What it does |
@@ -387,7 +432,8 @@ sheprd wait window            # also waits for the app to start
 Commands never bypass a confirmation. Restoring a checkpoint, teleporting a
 worktree, fanning out a prompt, running a worktree script the app has not
 seen, creating or destroying cloud machines, adding a cloud machine, pairing
-a phone for remote control, and revoking one open the app's own dialog
+a phone for remote control, revoking one, and starting or stopping the local
+artifact server open the app's own dialog
 (archiving a worktree and approving a phone have no command at all), already
 pointed at your checkout, the machines, or the device named, and the user
 confirms there.

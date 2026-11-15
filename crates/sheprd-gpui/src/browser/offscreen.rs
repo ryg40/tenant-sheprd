@@ -29,6 +29,9 @@ pub(crate) struct Pages {
     pages: HashMap<TabId, Rc<Page>>,
     /// Only reports from this instance may change the Walkr section.
     walkr: Option<PageKey>,
+    /// Only reports from this instance may change the page of a saved
+    /// Walkr session.
+    walkr_session: Option<PageKey>,
     shown: Vec<TabId>,
     /// Where each page drew in the frame being drawn.
     drawn: Drawn,
@@ -55,6 +58,7 @@ impl Default for Pages {
             colors: Colors::default(),
             pages: HashMap::new(),
             walkr: None,
+            walkr_session: None,
             shown: Vec::new(),
             drawn: Drawn::default(),
             reports,
@@ -122,7 +126,7 @@ impl Pages {
             | Location::Devices
             | Location::CoreTerminal { .. } => None,
         };
-        self.make(tab.id, location.page_url(), root, cx)
+        self.make(tab.id, location.page_url(), root, None, cx)
     }
 
     /// Creates the Walkr section's page at `address` if the window has none.
@@ -133,7 +137,28 @@ impl Pages {
         _: &mut Window,
         cx: &mut Context<SheprdWindow>,
     ) -> crate::Result<()> {
-        self.make(TabId::WALKR, address.expose().to_owned(), None, cx)
+        self.make(TabId::WALKR, address.expose().to_owned(), None, None, cx)
+    }
+
+    /// Creates page `id` at `url`, showing the app's own `document`, if the
+    /// window has none. It has no tab and no folder.
+    pub(crate) fn ensure_document(
+        &mut self,
+        id: TabId,
+        url: String,
+        document: &super::document::Document,
+        _: &mut Window,
+        cx: &mut Context<SheprdWindow>,
+    ) -> crate::Result<()> {
+        self.make(id, url, None, Some(document.clone()), cx)
+    }
+
+    /// Loads `url` in page `id`; whether the window has the page.
+    pub(crate) fn load_document(&mut self, id: TabId, url: String) -> bool {
+        let Some(page) = self.pages.get(&id) else {
+            return false;
+        };
+        page.send(|key| Command::Load(key, url))
     }
 
     /// Creates tab `id`'s page at `url`, unless the window has it.
@@ -142,6 +167,7 @@ impl Pages {
         id: TabId,
         url: String,
         root: Option<std::path::PathBuf>,
+        document: Option<super::document::Document>,
         cx: &mut Context<SheprdWindow>,
     ) -> crate::Result<()> {
         if self.pages.contains_key(&id) {
@@ -163,6 +189,8 @@ impl Pages {
         let key: PageKey = NEXT_PAGE.fetch_add(1, Ordering::Relaxed);
         let source = if id == TabId::WALKR {
             Source::Walkr(key)
+        } else if id == TabId::WALKR_SESSION {
+            Source::WalkrSession(key)
         } else {
             Source::Tab(id)
         };
@@ -175,6 +203,7 @@ impl Pages {
             // Only a local page, which the agent wrote, gets `herdr.send`.
             bridge: root.is_some(),
             root,
+            document,
             light: self.light,
             log_console: id != TabId::WALKR,
             source,
@@ -195,6 +224,9 @@ impl Pages {
         self.pages.insert(id, Rc::new(page));
         if id == TabId::WALKR {
             self.walkr = Some(key);
+        }
+        if id == TabId::WALKR_SESSION {
+            self.walkr_session = Some(key);
         }
         Ok(())
     }
@@ -257,6 +289,9 @@ impl Pages {
     pub(crate) fn close(&mut self, id: TabId) {
         if id == TabId::WALKR {
             self.walkr = None;
+        }
+        if id == TabId::WALKR_SESSION {
+            self.walkr_session = None;
         }
         self.shown.retain(|shown| *shown != id);
         self.drawn.borrow_mut().remove(&id);
@@ -370,6 +405,9 @@ impl Pages {
             let resolved = event.resolve(|source| match source {
                 Source::Tab(id) => Some(id),
                 Source::Walkr(key) => (self.walkr == Some(key)).then_some(TabId::WALKR),
+                Source::WalkrSession(key) => {
+                    (self.walkr_session == Some(key)).then_some(TabId::WALKR_SESSION)
+                }
             });
             if resolved.is_some() {
                 return resolved;

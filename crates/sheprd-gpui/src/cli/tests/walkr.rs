@@ -109,7 +109,7 @@ fn a_misplaced_address_is_in_no_error_as_text_json_or_debug() {
 }
 
 #[test]
-fn walkr_disconnect_and_status_take_no_argument() {
+fn walkr_disconnect_status_and_clear_take_no_argument() {
     assert_eq!(
         parse(&["walkr", "disconnect"]).unwrap(),
         walkr(WalkrCommand::Disconnect)
@@ -118,6 +118,12 @@ fn walkr_disconnect_and_status_take_no_argument() {
         parse(&["walkr", "status"]).unwrap(),
         walkr(WalkrCommand::Status)
     );
+    assert_eq!(
+        parse(&["walkr", "clear"]).unwrap(),
+        walkr(WalkrCommand::Clear)
+    );
+    assert!(parse(&["walkr", "clear", "--json"]).unwrap().json);
+    assert!(parse(&["walkr", "clear", "local"]).is_err());
     assert!(parse(&["walkr", "disconnect", "--json"]).unwrap().json);
     assert!(parse(&["walkr", "disconnect", "extra"]).is_err());
     // No command closes the page.

@@ -512,6 +512,8 @@ pub(crate) fn run() -> std::process::ExitCode {
             #[cfg(target_os = "macos")]
             crate::accessibility::window_focus::install();
             crate::caffeine::install(cx);
+            // Looks for the `artifacts` program off this thread; runs nothing.
+            crate::artifacts::find_program(cx);
             crate::endpoint::watch_network();
             #[cfg(any(target_os = "macos", windows))]
             crate::app_badge::install(cx);

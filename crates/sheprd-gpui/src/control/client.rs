@@ -2,6 +2,7 @@
 //! the running app (or read the app's files), and print the answer as text
 //! or, with `--json`, as one JSON document.
 mod app;
+mod artifacts;
 mod browser;
 mod chat;
 mod events;
@@ -13,6 +14,7 @@ mod local;
 mod mods;
 mod open;
 mod remote;
+mod repos;
 mod settings;
 mod tabs;
 mod walkr;
@@ -468,6 +470,7 @@ pub(crate) fn run(invocation: Invocation) -> ExitCode {
         ControlCommand::Remote(command) => remote::remote(command, &context),
         ControlCommand::Mod(command) => mods::run(command, &context),
         ControlCommand::Walkr(op) => walkr::run(op, &context),
+        ControlCommand::Artifacts(command) => artifacts::run(command, &context),
         ControlCommand::Files(command) => files::run(command, &context),
         ControlCommand::Search {
             files,

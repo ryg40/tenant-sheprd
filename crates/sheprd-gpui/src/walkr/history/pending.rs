@@ -1,7 +1,7 @@
 //! The saved sessions that wait for a pick, for the count on the activity
 //! bar: the tally of a host's rows, and the read of this computer. A record
 //! gives `status`, `createdAt` and `title` from its first bytes, as a row of
-//! the list does, and the newest waiting one also `repo.name`. Records are
+//! the list does, and each kept waiting one also `repo.name`. Records are
 //! untrusted data: a symlink, a record over the size bound or a malformed
 //! one is skipped, and the others still count. An SSH host runs the reader
 //! of `waiting::remote`.
@@ -12,7 +12,12 @@ use super::{
 use crate::walkr::{run::is_session_id, waiting::Error};
 use chrono::{DateTime, Utc};
 use serde::de::{self, DeserializeSeed, IgnoredAny, MapAccess, Visitor};
-use std::{fmt, fs, io::Read, path::Path, time::Instant};
+use std::{
+    fmt, fs,
+    io::{BufReader, Read},
+    path::Path,
+    time::Instant,
+};
 
 /// The most bytes read to find `repo.name`, which Walkr writes after the
 /// brief of at most 8,000 characters.
@@ -29,6 +34,8 @@ pub(crate) struct Pending {
     pub(crate) id: String,
     pub(crate) created: Option<DateTime<Utc>>,
     pub(crate) title: Option<String>,
+    /// The `repo.name` its record names, for the workspace of a click.
+    pub(crate) repo: Option<String>,
 }
 
 /// What one host's sessions say.
@@ -38,10 +45,17 @@ pub(crate) struct Tally {
     pub(crate) waiting: usize,
     /// The newest [`KEPT`] of them, newest first.
     pub(crate) newest: Vec<Pending>,
-    /// The `repo.name` of the newest one, when its record names one.
-    pub(crate) repo: Option<String>,
     /// The session records read, whatever their status.
     pub(crate) sessions: usize,
+    /// A Walkr server of the host's record answers. Only the reader of an
+    /// SSH host checks; it does not count as a waiting page.
+    pub(crate) live: bool,
+    /// The IDs of every session that waits, sorted: what a clear dismisses
+    /// (`waiting::Dismissed`). At most [`super::ENTRY_LIMIT`].
+    pub(crate) open: Vec<String>,
+    /// The read saw the whole sessions folder: it ended, and no entry limit
+    /// cut it. Only such a read forgets a dismissed session.
+    pub(crate) complete: bool,
 }
 
 /// The tally of `rows`, which counts only the `open` ones.
@@ -58,17 +72,23 @@ pub(crate) fn tally(rows: impl IntoIterator<Item = Row>) -> Tally {
                 id: row.id,
                 created: row.created,
                 title,
+                repo: None,
             })
         })
         .collect();
     newest.sort_unstable_by(|a, b| (b.created, &b.id).cmp(&(a.created, &a.id)));
     let waiting = newest.len();
+    let mut open: Vec<String> = newest.iter().map(|pending| pending.id.clone()).collect();
+    open.sort_unstable();
     newest.truncate(KEPT);
     Tally {
         waiting,
         newest,
-        repo: None,
         sessions,
+        live: false,
+        open,
+        // The reader that knows its entry limit says so.
+        complete: false,
     }
 }
 
@@ -81,12 +101,20 @@ pub(crate) fn local(home: &Path, deadline: Instant) -> Result<Tally, Error> {
     let root = super::root(home);
     match fs::symlink_metadata(&root) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(Tally::default());
+            return Ok(Tally {
+                complete: true,
+                ..Tally::default()
+            });
         }
         Err(error) => return Err(Error::Read(error)),
         // A symlink in place of the folder is refused, as the list does:
         // `symlink_metadata` does not follow it.
-        Ok(meta) if !meta.is_dir() => return Ok(Tally::default()),
+        Ok(meta) if !meta.is_dir() => {
+            return Ok(Tally {
+                complete: true,
+                ..Tally::default()
+            });
+        }
         Ok(_) => {}
     }
     let mut ids = Vec::new();
@@ -96,6 +124,8 @@ pub(crate) fn local(home: &Path, deadline: Instant) -> Result<Tally, Error> {
     {
         ids.push(entry.map_err(Error::Read)?);
     }
+    // A folder of `ENTRY_LIMIT` entries may hold more that were not read.
+    let complete = ids.len() < super::ENTRY_LIMIT;
     let ids: Vec<String> = ids
         .into_iter()
         // `DirEntry::file_type` does not follow a symlink.
@@ -118,25 +148,26 @@ pub(crate) fn local(home: &Path, deadline: Instant) -> Result<Tally, Error> {
         rows.push(read);
     }
     let mut tally = tally(rows);
-    if let Some(newest) = tally.newest.first() {
-        tally.repo = open::record(home, &newest.id).ok().and_then(|(file, _)| {
-            let mut prefix = Vec::new();
-            Deadline::new(file, deadline)
-                .take(REPO_PREFIX)
-                .read_to_end(&mut prefix)
-                .ok()?;
-            repo_name(&prefix)
+    tally.complete = complete;
+    // Each kept page names its repository, so that a click still finds a
+    // workspace when the newer ones are dismissed.
+    for pending in &mut tally.newest {
+        pending.repo = open::record(home, &pending.id).ok().and_then(|(file, _)| {
+            repo_name(BufReader::new(
+                Deadline::new(file, deadline).take(REPO_PREFIX),
+            ))
         });
     }
     Ok(tally)
 }
 
 /// `repo.name` from the first bytes of a record, when it is a name Walkr
-/// accepts; see [`valid_repo`].
-pub(crate) fn repo_name(prefix: &[u8]) -> Option<String> {
+/// accepts; see [`valid_repo`]. The parse stops at `repo`, so a record is
+/// read only up to it.
+fn repo_name(record: impl Read) -> Option<String> {
     let mut repo = Repo::default();
     // The prefix may end inside the record: what came before counts.
-    let _ = (&mut repo).deserialize(&mut serde_json::Deserializer::from_slice(prefix));
+    let _ = (&mut repo).deserialize(&mut serde_json::Deserializer::from_reader(record));
     repo.name.filter(|name| valid_repo(name))
 }
 

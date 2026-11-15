@@ -54,11 +54,14 @@ fn roundtrip_and_reset_drain_after_drop() {
             agent_sort: Some(AgentSort::Priority),
             device_order: Vec::new(),
             kanban_lane_order: Vec::new(),
+            kanban_ranks: Default::default(),
             mod_panel_width: None,
             notes_width: None,
+            orchestrator_repos: None,
             review_files_width: None,
             sidebar_split: Some(0.4),
             sidebar_width: Some(width as f32),
+            walkr_dismissed: Default::default(),
         });
     }
     let worker = preferences.worker.take().unwrap();
@@ -74,11 +77,14 @@ fn roundtrip_and_reset_drain_after_drop() {
             agent_sort: Some(AgentSort::Priority),
             device_order: Vec::new(),
             kanban_lane_order: Vec::new(),
+            kanban_ranks: Default::default(),
             mod_panel_width: None,
             notes_width: None,
+            orchestrator_repos: None,
             review_files_width: None,
             sidebar_split: Some(0.4),
             sidebar_width: Some(100.0),
+            walkr_dismissed: Default::default(),
         }
     );
     preferences.save(Chrome::default());
@@ -101,11 +107,14 @@ fn only_a_toggled_sort_is_stored_and_older_files_migrate() {
         agent_sort,
         device_order: Vec::new(),
         kanban_lane_order: Vec::new(),
+        kanban_ranks: Default::default(),
         mod_panel_width: None,
         notes_width: None,
+        orchestrator_repos: None,
         review_files_width: None,
         sidebar_split: None,
         sidebar_width: Some(240.0),
+        walkr_dismissed: Default::default(),
     };
     for (json, expected) in [
         // A file from before the sort existed follows the daemon.
@@ -185,11 +194,14 @@ fn drop_does_not_wait_for_blocked_worker_and_queued_saves_still_drain() {
             agent_sort: Some(AgentSort::Grouped),
             device_order: Vec::new(),
             kanban_lane_order: Vec::new(),
+            kanban_ranks: Default::default(),
             mod_panel_width: None,
             notes_width: None,
+            orchestrator_repos: None,
             review_files_width: None,
             sidebar_split: None,
             sidebar_width: Some(160.),
+            walkr_dismissed: Default::default(),
         },
         Chrome {
             activity_last_opened: Default::default(),
@@ -197,11 +209,14 @@ fn drop_does_not_wait_for_blocked_worker_and_queued_saves_still_drain() {
             agent_sort: Some(AgentSort::Priority),
             device_order: Vec::new(),
             kanban_lane_order: Vec::new(),
+            kanban_ranks: Default::default(),
             mod_panel_width: None,
             notes_width: Some(420.),
+            orchestrator_repos: None,
             review_files_width: None,
             sidebar_split: Some(0.6),
             sidebar_width: Some(400.),
+            walkr_dismissed: Default::default(),
         },
         Chrome::default(),
     ];
@@ -321,11 +336,14 @@ fn malformed_and_invalid_widths_fall_back_to_default(cx: &mut TestAppContext) {
                     agent_sort: None,
                     device_order: Vec::new(),
                     kanban_lane_order: Vec::new(),
+                    kanban_ranks: Default::default(),
                     mod_panel_width: None,
                     notes_width: None,
+                    orchestrator_repos: None,
                     review_files_width: None,
                     sidebar_split: None,
                     sidebar_width: Some(width),
+                    walkr_dismissed: Default::default(),
                 }
             )
             .is_err()
@@ -337,11 +355,14 @@ fn malformed_and_invalid_widths_fall_back_to_default(cx: &mut TestAppContext) {
         agent_sort: None,
         device_order: Vec::new(),
         kanban_lane_order: Vec::new(),
+        kanban_ranks: Default::default(),
         mod_panel_width: None,
         notes_width: None,
+        orchestrator_repos: None,
         review_files_width: None,
         sidebar_split: None,
         sidebar_width: Some(237.5),
+        walkr_dismissed: Default::default(),
     };
     write_chrome(&path, chrome.clone()).unwrap();
     assert_eq!(read_chrome(&path).unwrap(), chrome);
@@ -358,11 +379,14 @@ fn invalid_sidebar_splits_preserve_other_preferences() {
         agent_sort: Some(AgentSort::Priority),
         device_order: Vec::new(),
         kanban_lane_order: Vec::new(),
+        kanban_ranks: Default::default(),
         mod_panel_width: None,
         notes_width: None,
+        orchestrator_repos: None,
         review_files_width: None,
         sidebar_split: None,
         sidebar_width: Some(240.0),
+        walkr_dismissed: Default::default(),
     };
     for split in [
         "null", "0", "-1", "0.099", "0.901", "1e100", "1e-100", "\"0.5\"", "true", "[]", "{}",
@@ -407,11 +431,14 @@ fn sidebar_split_roundtrips_including_boundaries_and_reset() {
             agent_sort: Some(AgentSort::Priority),
             device_order: Vec::new(),
             kanban_lane_order: Vec::new(),
+            kanban_ranks: Default::default(),
             mod_panel_width: None,
             notes_width: None,
+            orchestrator_repos: None,
             review_files_width: None,
             sidebar_split,
             sidebar_width: Some(240.0),
+            walkr_dismissed: Default::default(),
         };
         write_chrome(&path, chrome.clone()).unwrap();
         let stored: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
@@ -441,5 +468,6 @@ mod activity_last_opened;
 mod activity_panel;
 mod device_order;
 mod notes_width;
+mod walkr_dismissed;
 
 mod kanban_order;

@@ -12,7 +12,10 @@ mod paths;
 mod probe;
 mod run;
 mod section;
+#[cfg(not(embedded_pages))]
+mod session_text;
 mod state;
+mod waiting_clear;
 mod waiting_count;
 #[cfg(unix)]
 mod waiting_remote;

@@ -33,6 +33,17 @@ impl Reader {
     pub(super) fn ask(&self) {
         let _ = self.wake.try_send(());
     }
+
+    /// A reader without a thread, whose answers are `answers`.
+    #[cfg(test)]
+    pub(super) fn test(answers: mpsc::Receiver<Result<Tally, Error>>) -> Self {
+        let (wake, _) = mpsc::sync_channel(1);
+        Self {
+            wake,
+            answers,
+            cancelled: Arc::new(AtomicBool::new(false)),
+        }
+    }
 }
 
 impl Drop for Reader {

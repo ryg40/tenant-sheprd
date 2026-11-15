@@ -26,6 +26,7 @@ mod projects;
 mod pull;
 mod remote;
 mod repo;
+pub(crate) mod repo_select;
 mod rows;
 mod status;
 mod tasks;
@@ -205,6 +206,8 @@ pub(crate) struct OrchestratorView {
     /// What only the Tasks list narrows by.
     task_filters: tasks::TaskFilters,
     collapsed: HashSet<String>,
+    /// The active repositories and their picker.
+    repo_select: repo_select::State,
     search: Entity<SearchInput>,
     query: String,
     /// The selected row's item key, or run id on the Runs tab.
@@ -226,6 +229,8 @@ pub(crate) struct OrchestratorView {
     /// The open item's description, parsed once per change of its text.
     description: markdown::Markdown,
     dialog: Option<dispatch::Dialog>,
+    /// The agent and role the next dispatch dialog starts from.
+    last_launch: dispatch::Last,
     confirm: Option<dispatch::Confirm>,
     /// The newest action's outcome, until dismissed or replaced.
     notice: Option<Notice>,
@@ -299,6 +304,7 @@ impl OrchestratorView {
             label: None,
             task_filters: tasks::TaskFilters::default(),
             collapsed: HashSet::new(),
+            repo_select: repo_select::State::new(cx),
             search,
             query: String::new(),
             selected: None,
@@ -312,6 +318,7 @@ impl OrchestratorView {
             holders: HashMap::new(),
             description: markdown::Markdown::default(),
             dialog: None,
+            last_launch: dispatch::Last::default(),
             roles: Vec::new(),
             confirm: None,
             notice: None,
@@ -413,6 +420,7 @@ impl OrchestratorView {
         }
         self.poll_move_dialog(cx);
         self.prepare_kanban(cx);
+        self.prepare_repo_roster(cx);
         if self.pr.poll() {
             // A comment or merge landed: read the pull request and list again.
             if self.pr.take_settled() {
@@ -536,6 +544,7 @@ impl OrchestratorView {
             if let Some(dialog) = &mut self.dialog {
                 dialog.forget_role();
             }
+            self.last_launch.forget_role();
         }
     }
 
@@ -827,6 +836,12 @@ impl OrchestratorView {
     }
 
     fn on_key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if self.repo_select.picker.is_open() {
+            if self.repo_picker_key(event, window, cx) {
+                cx.stop_propagation();
+            }
+            return;
+        }
         if (self.dialog.is_some() || self.confirm.is_some())
             && self.dialog_key(&event.keystroke.key, window, cx)
         {
@@ -834,6 +849,10 @@ impl OrchestratorView {
             return;
         }
         if self.dialog.is_some() {
+            return;
+        }
+        if self.confirm.is_none() && self.repo_picker_shortcut(event, window, cx) {
+            cx.stop_propagation();
             return;
         }
         if self.kanban.shown && self.kanban_key(event, window, cx) {
@@ -932,10 +951,11 @@ impl Focusable for OrchestratorView {
 impl Render for OrchestratorView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let body = if self.kanban.shown {
-            self.render_kanban(window, cx)
+            self.render_board_with_repos(window, cx)
         } else {
             self.render_inbox(window, cx)
         };
+        self.repo_picker_frame(window);
         let notice = self.render_notice(cx);
         let overlay = self.render_overlay(cx);
         let look = &self.look;

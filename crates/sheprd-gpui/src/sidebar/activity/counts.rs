@@ -40,7 +40,11 @@ impl Counts {
     /// One view's items added to the counts, skipping what `seen` holds.
     /// A copy already counted still offers its time, since views sync on
     /// their own and a later one may hold the newer copy.
-    pub(super) fn add(&mut self, seen: &mut HashSet<String>, items: &[Item]) {
+    pub(super) fn add<'a>(
+        &mut self,
+        seen: &mut HashSet<String>,
+        items: impl IntoIterator<Item = &'a Item>,
+    ) {
         for item in items {
             if !open(item) {
                 continue;
@@ -125,9 +129,8 @@ impl SheprdWindow {
         };
         let mut seen = HashSet::new();
         for (_, view) in self.orchestrator_views() {
-            for (_, items, _) in view.read(cx).listed() {
-                counts.add(&mut seen, items);
-            }
+            // Only the active repositories count.
+            counts.add(&mut seen, view.read(cx).shown_items());
         }
         counts
     }

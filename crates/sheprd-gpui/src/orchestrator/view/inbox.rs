@@ -432,6 +432,7 @@ impl OrchestratorView {
             .children(sources)
             .children(no_github)
             .child(div().flex_1())
+            .child(self.render_repo_control(cx))
             .child(self.render_refresh(cx))
             .when(dispatchable, |el| {
                 el.child(

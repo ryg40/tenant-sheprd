@@ -90,6 +90,8 @@ pub(crate) struct MenuState {
     pub(super) folding: Option<super::devices::picker::Folding>,
     /// The folder the open-checkout question is about.
     pub(super) open_checkout: Option<std::path::PathBuf>,
+    /// The start or stop the artifact server question is about.
+    pub(super) artifacts: Option<crate::artifacts::Question>,
     /// The address the open-link question is about.
     pub(super) open_link: Option<crate::terminal::ExternalUrl>,
     /// The signal the Ports question is about.
@@ -372,6 +374,7 @@ impl MenuState {
             unfold_from: 0.,
             folding: None,
             open_checkout: None,
+            artifacts: None,
             open_link: None,
             port_signal: None,
             #[cfg(feature = "cloud")]
@@ -458,6 +461,7 @@ impl MenuState {
         self.unfolded_device = None;
         self.folding = None;
         self.open_checkout = None;
+        self.artifacts = None;
         self.open_link = None;
         self.port_signal = None;
         #[cfg(feature = "cloud")]

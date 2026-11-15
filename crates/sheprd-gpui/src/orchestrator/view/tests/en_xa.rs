@@ -164,6 +164,8 @@ fn the_sections_show_only_messages_and_what_repositories_hold() {
                     Confirm::Stop {
                         run: "r1".into(),
                         agent: "claude".into(),
+                        item: String::new(),
+                        repo: String::new(),
                     },
                     cx,
                 );

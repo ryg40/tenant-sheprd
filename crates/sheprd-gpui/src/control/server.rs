@@ -3,6 +3,7 @@
 //! answered at once; a request that waits for something (notes, an event, a
 //! page) is parked as a [`Watch`] and checked on every tick.
 mod app;
+mod artifacts;
 mod browser;
 mod chat;
 mod cloud;
@@ -13,6 +14,7 @@ mod kanban;
 mod links;
 mod mods;
 mod remote;
+mod repos;
 mod settings;
 mod tabs;
 mod walkr;
@@ -255,6 +257,7 @@ fn named_window(request: &Request) -> Option<u64> {
         Request::Walkr(call) => call.caller.window,
         Request::Files(call) => call.caller.window,
         Request::Orchestrator(call) => call.caller.window,
+        Request::Artifacts(call) => call.caller.window,
     }
 }
 
@@ -270,6 +273,7 @@ fn serve(incoming: socket::Incoming, state: &mut State, cx: &mut App) {
             | Request::Remote(_)
             | Request::Walkr(_)
             | Request::Files(_)
+            | Request::Artifacts(_)
     );
     if let Some(id) = named_window(&incoming.request)
         && !main_windows(cx)
@@ -309,6 +313,7 @@ fn serve(incoming: socket::Incoming, state: &mut State, cx: &mut App) {
         Request::Walkr(call) => walkr::serve(call, incoming, &mut state.watches, cx),
         Request::Files(call) => files::serve(call, incoming, &mut state.watches, cx),
         Request::Orchestrator(call) => incoming.respond(kanban::serve(call, cx)),
+        Request::Artifacts(call) => artifacts::serve(call, incoming, &mut state.watches, cx),
     }
 }
 

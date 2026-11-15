@@ -296,6 +296,8 @@ pub(crate) struct SheprdWindow {
     /// Orchestrator views' requests, acted on at the next tick.
     pub(crate) orchestrator_events: Vec<(crate::orchestrator::ViewId, crate::orchestrator::Event)>,
     pub(crate) orchestrator_live: crate::orchestrator::LiveCache,
+    /// The orchestrator's active repositories, saved with the chrome.
+    pub(crate) orchestrator_repos: crate::orchestrator::view::repo_select::Stored,
     /// Whether an orchestrator's dispatch dialog ranks hosts by their load.
     pub(crate) orchestrator_sampling: bool,
     /// The orchestrator views the sections made, by id.
@@ -539,6 +541,7 @@ impl SheprdWindow {
         let Ok(chrome) = loaded else {
             // Unknown disk contents are not defaults. Keep all automatic saves fenced.
             self.kanban_order.failed.set(true);
+            self.orchestrator_repos.failed.set(true);
             return;
         };
         let stored = chrome.clone();
@@ -570,7 +573,13 @@ impl SheprdWindow {
             self.agent_sort = sort;
             self.agent_sort_modified = true;
         }
-        self.kanban_order.restore(chrome.kanban_lane_order);
+        self.kanban_order
+            .restore(crate::orchestrator::view::kanban::order::Keys {
+                lanes: chrome.kanban_lane_order,
+                ranks: chrome.kanban_ranks,
+            });
+        self.orchestrator_repos.restore(chrome.orchestrator_repos);
+        self.walkr.waiting.restore_dismissed(chrome.walkr_dismissed);
         // Only save a changed, fully merged snapshot, never an unknown/default fallback.
         if self.chrome() != stored {
             self.save_chrome();
@@ -603,19 +612,26 @@ impl SheprdWindow {
             self.apply_stored_chrome(chrome);
             cx.notify();
         }
-        if let Some(saved) = self.sidebar_preferences.as_ref().and_then(|p| p.saved())
-            && self
+        if let Some(saved) = self.sidebar_preferences.as_ref().and_then(|p| p.saved()) {
+            if self
+                .orchestrator_repos
+                .settle(saved.revision, saved.result.is_ok())
+            {
+                cx.notify();
+            }
+            if self
                 .kanban_order
                 .pending
                 .get()
                 .is_some_and(|revision| saved.revision >= revision)
-        {
-            self.kanban_order.pending.set(None);
-            self.kanban_order.failed.set(saved.result.is_err());
-            if saved.result.is_ok() {
-                self.kanban_order.unsaved.set(false);
+            {
+                self.kanban_order.pending.set(None);
+                self.kanban_order.failed.set(saved.result.is_err());
+                if saved.result.is_ok() {
+                    self.kanban_order.unsaved.set(false);
+                }
+                cx.notify();
             }
-            cx.notify();
         }
         let old_pane = self
             .live

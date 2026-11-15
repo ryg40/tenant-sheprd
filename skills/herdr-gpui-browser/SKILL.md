@@ -269,6 +269,8 @@ for what only Sheprd shows or keeps.
 | Show the read-only GitHub and Forgejo Kanban board | `sheprd ui panel kanban` |
 | Read the window's prepared board without showing it | `sheprd orchestrator board --json`, then `sheprd orchestrator board --cursor CURSOR --json` |
 | Order a known lane locally, before another or at the end; use canonical keys from board output | `sheprd orchestrator board order LANE [--before LANE] --json` |
+| Set a lane's order of implementation locally (what to build first); read each card's `rank` from board output | `sheprd orchestrator board rank LANE ITEM... --json` |
+| Show only some repositories in Pull requests, Issues, Tasks, and Kanban; keys come from the list | `sheprd orchestrator repos --json`, then `sheprd orchestrator repos set KEY... --json` (or `--all`) |
 | Propose a Forgejo issue move with canonical board keys; opens native confirmation, never approves a tracker write | `sheprd orchestrator board move ITEM --lane LANE --to open\|in-progress\|in-review\|done --json` |
 | Diagnose missing GitHub details: last reported GraphQL quota and rate-limit retry delays | `sheprd pr quota --json` |
 | List the vulnerability reports outsiders filed and the open Dependabot alerts of your repositories, most severe first | `sheprd security --json` |
@@ -288,6 +290,7 @@ for what only Sheprd shows or keeps.
 | Read the alerts the user may have missed | `sheprd window alerts` |
 | Block until something happens in the app | `sheprd wait tab-closed ID --timeout 600`, `sheprd events --follow` |
 | Check that Walkr can be reached before asking the user to review there | `sheprd walkr status` |
+| Check the user's local artifact server, or show its page after an upload | `sheprd artifacts status`, `sheprd artifacts open` |
 | Show the Walkr section (needs a run, a saved Compare session on this computer, or `walkr.url`) | `sheprd ui panel walkr` |
 | Show a Walkr run you started in Sheprd's Walkr section | `sheprd walkr connect - --show` |
 | Read or change a Sheprd setting | `sheprd config get KEY`, `sheprd config set KEY VALUE` |

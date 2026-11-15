@@ -336,6 +336,7 @@ embedded_icons! {
     "pull-request.svg",
     "pulse.svg",
     "refresh.svg",
+    "scroll.svg",
     "search.svg",
     "sessions.svg",
     "settings.svg",

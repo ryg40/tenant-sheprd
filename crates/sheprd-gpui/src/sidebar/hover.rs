@@ -46,12 +46,15 @@ impl SheprdWindow {
             activity_panel: self.activity.chosen(),
             agent_sort: self.agent_sort_modified.then_some(self.agent_sort),
             device_order: self.device_order.clone(),
-            kanban_lane_order: self.kanban_order.keys.clone(),
+            kanban_lane_order: self.kanban_order.keys.lanes.clone(),
+            kanban_ranks: self.kanban_order.keys.ranks.clone(),
             mod_panel_width: self.mod_panel_width.chosen(),
             notes_width: self.notes_width.chosen(),
+            orchestrator_repos: self.orchestrator_repos.selection.clone(),
             review_files_width: self.review_files_width.chosen(),
             sidebar_split: self.sidebar_split,
             sidebar_width: self.sidebar_width,
+            walkr_dismissed: self.walkr.waiting.dismissed().clone(),
         }
     }
 
@@ -66,8 +69,16 @@ impl SheprdWindow {
             if self.kanban_order.unsaved.get() {
                 self.kanban_order.pending.set(Some(revision));
             }
-        } else if self.kanban_order.unsaved.get() {
-            self.kanban_order.failed.set(true);
+            if self.orchestrator_repos.unsaved.get() {
+                self.orchestrator_repos.pending.set(Some(revision));
+            }
+        } else {
+            if self.kanban_order.unsaved.get() {
+                self.kanban_order.failed.set(true);
+            }
+            if self.orchestrator_repos.unsaved.get() {
+                self.orchestrator_repos.failed.set(true);
+            }
         }
     }
 

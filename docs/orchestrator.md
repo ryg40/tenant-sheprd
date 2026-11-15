@@ -80,9 +80,17 @@ It keeps its own prepared rows and selection, without changing the Issues or Tas
 Control protocol version 19 adds `ui panel kanban` and `orchestrator board`.
 Version 20 adds `orchestrator board order` for local lane preferences.
 Version 21 adds each lane's Done history coverage to board responses.
+Version 26 adds `orchestrator board rank` and each card's `rank`.
 
 Preparation runs on the background executor with immutable snapshots and a revision fence.
-One virtual list aligns repository headers and compact card rows beneath fixed columns.
+One virtual list aligns repository headers and card rows beneath fixed columns.
+Every line has one fixed height, so the list stays exact and smooth at 2,000 cards.
+A lane header holds the repository, its host, freshness, and each column's count.
+An expanded lane's next line, of the same height, holds its history, mapping, and evidence.
+A card is a raised surface with a hover and a selected state, drawn from snapshot data alone.
+It shows the item key with an issue or pull request icon, the title on up to two lines, and up to three label chips with "+N".
+It also shows assignee initials, a pull request's draft or ready state, review decision, and checks, the newest running agent's status, and the age of the last update.
+Its tooltip and accessible name keep the whole title and say these marks in words.
 One horizontal scroll offset keeps those headings and cells aligned at narrow widths.
 The board reads the existing roster, including Forgejo account repositories, and starts no discovery service.
 Showing Kanban uses the existing visible sync schedule. Board reads alone start no provider I/O.
@@ -100,6 +108,28 @@ Account searches list issues, not repository membership, so they cannot prove re
 The existing preferences worker saves complete Chrome state and publishes one revision-tagged result.
 A late load yields to a user reorder. Save failure keeps the local order and shows an unsaved notice.
 Restart restores order, not selection or drag state. Lane operations send no tracker mutation.
+
+Each lane also has an order of implementation: a local rank of its items, first to build first.
+`kanban/rank.rs` is its pure reducer, beside the lane order, and keeps native item IDs for each lane key.
+Projection sorts each lane's ranked cards by rank before the cell caps; unranked cards follow in canonical order.
+A ranked card that is not in Done shows its number, counted over the lane's loaded, ranked, unsettled items.
+Filters and display caps never change a number.
+Dragging a card up or down in its own cell sets the order. The drop commits and Escape discards the drag.
+A drop in another column stays the move proposal with its native confirmation.
+The line the board paints is where the drop puts the card: above the card under the pointer's upper half, below it under the lower half.
+A drop ranks every card the cell then shows before the card, and keeps every rank already set.
+The rank keys and `board rank` refuse while a card drag is active.
+Alt+Shift+Up and Alt+Shift+Down move the selected card one place; Alt+Shift+Backspace removes its rank.
+`orchestrator board rank LANE [ITEM...]` replaces a lane's order with loaded canonical item keys; no ITEM clears it.
+An unknown lane or item refuses the whole command and changes nothing.
+The ranks save with the lane order in the same Chrome preferences, through the same worker and failure rules.
+They keep at most 512 lanes, 100 items for each lane, 2,000 items in all, and 1,024 UTF-8 bytes for each ID.
+A lane's ranks leave with the lane, on the lane order's pruning evidence (a complete, settled roster).
+An item's rank leaves only when the user or an agent clears or replaces it: Alt+Shift+Backspace, `board rank`, or a drag.
+An item absent from a read keeps its rank, even from a complete active listing and a live, untruncated history read.
+The active and history reads happen at different times, and history keeps 30 days, so no absence proves that the item left its tracker.
+Ranks of items the board no longer shows still count toward the limits.
+A change over a limit refuses with a notice that names the recovery: Alt+Shift+Backspace on a card, or `board rank` with fewer items.
 Done combines settled active records with the separate bounded history samples.
 Forgejo repository and account samples appear with a short coverage line in each lane's info column.
 The lane hint explains update-time sampling, the cutoff, last success, and account-wide limits.
@@ -184,6 +214,76 @@ Details and accessible names retain the complete cached title. A wire packing re
 The cursor binds the window, projection revision, and page offset.
 A stale cursor requests a restart; malformed or oversized cursors refuse.
 The transport ceiling remains 256 KiB. Responses omit descriptions, credentials, and raw provider errors.
+
+## Active repositories
+
+The Repositories control (`view/repo_select.rs`, `view/repo_select/picker.rs`)
+chooses which listed repositories the Pull requests, Issues, Tasks, and Kanban
+sections show. It sits in the list header and above the board, and reads
+"Repositories: all 41" or "Repositories: 3 of 41". Its popover has a filter
+field, All, None, and a checkbox row for each repository with its host. The
+rows are a virtual list. P opens the popover while the list or board holds the
+keyboard, and so do Enter and Space on the focused control. Up and Down move,
+Enter (or Space outside the field) flips a row, Tab and Shift-Tab move between
+the field, All, and None, where Enter or Space chooses, and Escape closes the
+popover. While it is open, no key reaches the list, board, or page under it,
+and keys an input method composes stay with the method. The popover opens and
+closes through `crate::motion::Toggle`.
+
+The picker, `orchestrator repos`, and a change's checks read one roster,
+prepared when what the workers read or the selection changes, never while
+drawing or on a key. It holds checkouts, the repositories of a Forgejo
+account's listed items, and those of its board history's settled records, so
+a repository with only a Done lane can be chosen. No provider is read for it.
+
+A repository is selected by the identity the board's lanes compare. GitHub
+and Forgejo use the lane's canonical key, without ASCII case. Other providers
+use the source's canonical key. A checkout is its remote's repository, else
+its Beads project. A Forgejo account or Azure DevOps listing gives each item
+its own repository.
+
+No saved selection means every repository is active, also one listed later.
+All returns to that state. While a selection is saved, a repository listed
+later is inactive and the picker marks it new. A repository whose identity is
+not read yet shows only without a selection.
+
+One predicate decides every place, before every other narrowing and before
+the display caps. A repository that is not active shows no list rows, no
+project menu entry, no lane, no cards, and no count in the activity bar's
+badges. The board's roster keeps hidden lanes, so their saved order stays and
+is never pruned. The board's loaded total still counts what workers loaded.
+`orchestrator board order` refuses a hidden lane as the lane it moves and as
+`--before`, and changes nothing then. A rank is a lane's local preference in
+the same way: a hidden lane keeps its saved ranks, and `orchestrator board
+rank`, the rank keys, and a rank drag refuse it and change nothing.
+
+Hiding a repository closes its open page, its dispatch dialog, its delete or
+merge confirmation, and its board popup and move menu, and withdraws its move
+dialog while that waits for confirmation. Dispatch, review, comment, merge,
+delete, and move confirmation each check the target again and refuse a hidden
+one. A write already handed to a worker finishes: nothing cancels or replays
+it.
+Workers keep syncing and keep their databases: the filter is on display
+only. A checkout's identity is known only after its worker's first read, and
+one Forgejo account worker reads many repositories.
+
+The selection is endpoint-local Chrome state, `orchestrator_repos` with
+`active` and `hidden` keys. It holds at most 512 keys of at most 1,024 UTF-8
+bytes, valid ones only. It saves through the preferences worker with the rest
+of the chrome, and follows the lane order's load and save rules. A load that
+fails fences saves. A late load yields to a change the user made. A failed
+save keeps the selection and shows "Repository selection not saved". Nothing
+prunes a saved key: a disconnected host or a failed listing keeps it, and a
+change keeps the state of every saved key not listed now. A change whose
+result would hold more than 512 keys is refused whole: the picker says so,
+`repos set` exits 2, and the saved selection stays. All always works.
+Unreadable stored values, such as an object without both arrays, are no
+selection, so every repository shows; a stored empty selection shows none.
+
+`orchestrator repos` lists the repositories and `orchestrator repos set
+KEY... | --all` sets the selection (control protocol version 25). Neither
+starts a worker or reads a provider. A set that names an unknown, malformed,
+or oversized key changes nothing.
 
 ## Move planning and confirmation boundary
 
@@ -380,11 +480,33 @@ prompt_file = "~/.local/state/tenant-pi/claude-role/coordinator.md"
 An unknown agent, an empty name, or a `prompt_file` that is not absolute
 stops the config from loading, as other bad values do.
 
-The dialog's Role row shows "Agent default" and each role whose `agents`
-holds the chosen agent. Only Claude (`--append-system-prompt-file <path>`) and
-Pi (`--append-system-prompt <path>`) take a role, so the row does not show
-for other agents. A change of agent that the role does not fit goes back to
-"Agent default". The start is
+The dispatch dialog leads with its two main choices, the agent and the
+role. The agent tiles put the agents that some role serves first, so Claude
+and Pi sit side by side. The role choice shows "Agent default" first, then
+each configured role with its prompt file and a chip for each agent it
+serves, so one role for `claude` and `pi` reads as one profile for both.
+Only Claude (`--append-system-prompt-file <path>`) and Pi
+(`--append-system-prompt <path>`) take a role. A role that the chosen agent
+cannot take shows dimmed with the reason and cannot be chosen. A change of
+agent that the role does not fit goes back to "Agent default". With no
+`[[agent_roles]]`, the role choice does not show.
+
+The branch stays in view. The prompt profile, model, extra instructions,
+and host fold under "More options", closed when the dialog opens. A bad
+model or extra instructions opens the fold to show the problem. A summary
+above the start button says what will start: the agent, the role and its
+prompt file (or "no role: the agent's own default"), the host, the model,
+and the branch, then the prompt profile and the extra instructions when
+they are not the default. It quotes the first line of the extra
+instructions, cut with an ellipsis. In a review, it also says when the
+profile replaces the built-in review prompt. The start button names the agent and the role,
+for example "Start Pi as tenant-pi coordinator". The review dialog of a
+pull request has the same layout.
+
+Each orchestrator view remembers the agent and role of its last dialog
+while the window stays open. The next dialog starts with them when the host has that agent. A
+change of `[[agent_roles]]` forgets the remembered role, as it does the role
+of an open dialog. The start is
 `herdr agent start ... -- [--model <model>] <role option> <path>`.
 
 Before anything is claimed, recorded, or created, the dispatch checks that

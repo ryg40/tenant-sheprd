@@ -6,6 +6,7 @@ use crate::{
     orchestrator::{Item, ItemKey, Provider, SourceKey},
 };
 
+mod artifacts;
 mod back;
 mod bubbles;
 mod counts;

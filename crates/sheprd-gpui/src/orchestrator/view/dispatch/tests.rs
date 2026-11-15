@@ -6,6 +6,8 @@ use crate::{search_input::SearchInput, teleport::AgentKind};
 use gpui::{AppContext, TestAppContext};
 use std::sync::Arc;
 
+mod launch;
+
 #[gpui::test]
 fn destination_inventory_reconciles_selection_and_ignores_other_hosts(cx: &mut TestAppContext) {
     let dir = tempfile::tempdir().unwrap();
@@ -40,6 +42,7 @@ fn destination_inventory_reconciles_selection_and_ignores_other_hosts(cx: &mut T
                 host: Some("remote".into()),
                 problem: None,
                 review: false,
+                more: Default::default(),
             });
             view.select_agent_host(cx);
             assert!(view.dialog.as_ref().unwrap().kind.is_none());

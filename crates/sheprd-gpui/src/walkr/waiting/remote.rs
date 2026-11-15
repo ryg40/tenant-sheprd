@@ -5,8 +5,11 @@
 //! Rust. A read has a deadline that output does not reset. A host without `python3` fails its read with
 //! [`Error::NoPython`]; nothing is installed.
 //!
-//! `list` gives the saved sessions; `page ID` gives the address of the
-//! private Compare page of the host's Walkr server. The address holds the
+//! `list` gives the saved sessions, and whether the host's Walkr server
+//! answers `/health` with the pid and protocol of its record (no token is
+//! sent); `page ID` gives the address of the private Compare page of that
+//! server for session `ID`, and `page` alone the same page without a
+//! session. The address holds the
 //! secret of that server run: [`Remote`] keeps it in memory only, and its
 //! `Debug` shows the port.
 use super::Error;
@@ -21,6 +24,7 @@ use serde::Deserialize;
 use sheprd_client::ScriptLimits;
 use sheprd_control_protocol::protocol::walkr::RunAddress;
 use std::{
+    collections::HashMap,
     fmt,
     sync::atomic::{AtomicBool, Ordering},
     thread,
@@ -53,7 +57,15 @@ const PAGE_PATH: &str = "/_walkr/compare/g/";
 #[serde(rename_all = "lowercase")]
 enum Line {
     Session(Record),
+    Server(Server),
     End(End),
+}
+
+/// A Walkr server of the host's record answers `/health`.
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum Server {
+    Live,
 }
 
 #[derive(Deserialize)]
@@ -61,6 +73,9 @@ enum Line {
 enum End {
     /// No sessions folder: the host counts 0.
     Absent,
+    /// The folder held more than `ENTRY_LIMIT` entries; the rest were not
+    /// read.
+    Cut,
     Read,
 }
 
@@ -205,6 +220,7 @@ fn parse_list(output: &[u8]) -> Result<Tally, Error> {
     let mut rows = Vec::new();
     let mut repos = Vec::new();
     let mut end = None;
+    let mut live = false;
     for line in text.lines() {
         if end.is_some() || line.len() > LINE {
             return Err(Error::Malformed);
@@ -224,49 +240,70 @@ fn parse_list(output: &[u8]) -> Result<Tally, Error> {
                 ));
                 repos.push((record.session_id, record.repo));
             }
+            // The reader writes one at most.
+            Line::Server(Server::Live) if live => return Err(Error::Malformed),
+            Line::Server(Server::Live) => live = true,
             Line::End(kind) => end = Some(kind),
         }
     }
     match end.ok_or(Error::Malformed)? {
-        End::Absent => Ok(Tally::default()),
-        End::Read => {
+        End::Absent => Ok(Tally {
+            live,
+            complete: true,
+            ..Tally::default()
+        }),
+        kind @ (End::Cut | End::Read) => {
+            let complete = matches!(kind, End::Read);
             let mut tally = pending::tally(rows);
-            tally.repo = tally.newest.first().and_then(|newest| {
-                repos
-                    .into_iter()
-                    .find(|(id, _)| *id == newest.id)
-                    .and_then(|(_, repo)| repo)
-                    .filter(|repo| pending::valid_repo(repo))
-            });
+            // Each kept page names its repository, as on this computer.
+            let mut repos: HashMap<String, String> = repos
+                .into_iter()
+                .filter_map(|(id, repo)| Some((id, repo?)))
+                .filter(|(_, repo)| pending::valid_repo(repo))
+                .collect();
+            for pending in &mut tally.newest {
+                pending.repo = repos.remove(&pending.id);
+            }
+            tally.live = live;
+            tally.complete = complete;
             Ok(tally)
         }
     }
 }
 
-/// The page of session `id` on the Walkr server of `host`. Only a read:
-/// the reader asks the server for its capabilities and its page path.
+/// The page of session `id` on the Walkr server of `host`, or with no `id`
+/// the server's Compare page itself. Only a read: the reader asks the
+/// server for its capabilities and its page path.
 pub(crate) fn page(
     host: &Host,
-    id: &str,
+    id: Option<&str>,
     deadline: Duration,
     cancelled: &AtomicBool,
 ) -> Result<Remote, Error> {
-    if !is_session_id(id) {
-        return Err(Error::PageRefused);
-    }
-    let output = run(
-        host,
-        &format!("page {id}"),
-        PAGE_OUTPUT,
-        deadline,
-        cancelled,
-    )?;
+    let mode = match id {
+        Some(id) if !is_session_id(id) => return Err(Error::PageRefused),
+        Some(id) => format!("page {id}"),
+        None => "page".to_owned(),
+    };
+    let output = run(host, &mode, PAGE_OUTPUT, deadline, cancelled)?;
     parse_page(&output, id)
 }
 
+/// Whether `path` is a whole Compare page path: `PAGE_PATH` and 1 to 256
+/// lowercase hex digits, so no query, no other segment and no dot segment.
+fn is_page_path(path: &str) -> bool {
+    path.strip_prefix(PAGE_PATH).is_some_and(|id| {
+        (1..=256).contains(&id.len())
+            && id
+                .bytes()
+                .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+    })
+}
+
 /// The address in the answer of `page`: `http` on a loopback host with a
-/// port and no user info, the page path, and `id` as its fragment.
-pub(crate) fn parse_page(output: &[u8], id: &str) -> Result<Remote, Error> {
+/// port and no user info, the page path, and `id` as its fragment, or no
+/// fragment at all without an `id`.
+pub(crate) fn parse_page(output: &[u8], id: Option<&str>) -> Result<Remote, Error> {
     let text = std::str::from_utf8(output).map_err(|_| Error::Malformed)?;
     let address = match serde_json::from_str::<Answer>(text.trim()).map_err(|_| Error::Malformed)? {
         Answer::None(Missing::Record) => return Err(Error::NoServer),
@@ -276,14 +313,15 @@ pub(crate) fn parse_page(output: &[u8], id: &str) -> Result<Remote, Error> {
         Answer::Page(address) => address,
     };
     let parsed = run::parse(&RunAddress::new(address.as_str())).map_err(|_| Error::PageRefused)?;
-    if parsed.session() != Some(id) {
+    let fragment = address.split_once('#').map(|(_, fragment)| fragment);
+    if parsed.session() != id || (id.is_none() && fragment.is_some()) {
         return Err(Error::PageRefused);
     }
     // `parse` proved the shape `http://HOST:PORT` before the path.
     let (authority, rest) = address
         .strip_prefix("http://")
         .and_then(|rest| rest.find('/').map(|at| rest.split_at(at)))
-        .filter(|(_, rest)| rest.starts_with(PAGE_PATH))
+        .filter(|(_, rest)| is_page_path(rest.split_once('#').map_or(rest, |(path, _)| path)))
         .ok_or(Error::PageRefused)?;
     let port = authority
         .rsplit_once(':')

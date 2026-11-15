@@ -2,9 +2,12 @@
 # run there as `python3 -I - MODE`. It writes no file and keeps nothing.
 #
 # `list` prints one JSON line for each saved Compare session that it reads,
-# then an `end` line. `page ID` prints the address of the private Compare
-# page of the Walkr server of this home, with `#ID`, or why there is none.
-# The token of the server stays on the host: only the page address leaves.
+# a `server` line when a live Walkr server of this home answers `/health`
+# (checked without its token), then an `end` line. `page ID` prints the
+# address of the private Compare page of the Walkr server of this home,
+# with `#ID`, or why there is none; `page` alone prints that page without a
+# session. The token of the server stays on the host: only the page address
+# leaves.
 #
 # The home is the trust anchor: its real path opens as it is, a symlink
 # included. Each folder below it opens from the parent handle with
@@ -12,7 +15,9 @@
 # on the opened handle.
 #
 # SIGALRM ends the program at its deadline wherever it blocks, with the
-# exit status TIMED_OUT, which Sheprd reads as "not in time".
+# exit status TIMED_OUT, which Sheprd reads as "not in time". The optional live
+# server check runs under a shorter timer of its own (`within`), which ends
+# before the deadline.
 import errno
 import hashlib
 import http.client
@@ -208,12 +213,16 @@ def list_sessions():
     try:
         root = walk(SESSIONS)
     except Absent:
+        if live_server():
+            emit({"server": "live"})
         emit({"end": "absent"})
         return
+    cut = False
     try:
         with os.scandir(root) as entries:
             for seen, entry in enumerate(entries):
                 if seen >= ENTRY_LIMIT:
+                    cut = True
                     break
                 late()
                 name = entry.name
@@ -224,7 +233,9 @@ def list_sessions():
                     emit({"session": found})
     finally:
         os.close(root)
-    emit({"end": "read"})
+    if live_server():
+        emit({"server": "live"})
+    emit({"end": "cut" if cut else "read"})
 
 
 def whole(value):
@@ -232,8 +243,8 @@ def whole(value):
     return isinstance(value, int) and not isinstance(value, bool)
 
 
-def ask(port, path, token=None):
-    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+def ask(port, path, token=None, timeout=5):
+    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
     headers = {"x-human-review-token": token} if token is not None else {}
     try:
         connection.request("GET", path, headers=headers)
@@ -241,21 +252,22 @@ def ask(port, path, token=None):
         body = answer.read(ANSWER_LIMIT + 1)
         if answer.status != 200 or len(body) > ANSWER_LIMIT:
             return None
-        value = json.loads(body.decode("utf-8"))
+        try:
+            value = json.loads(body.decode("utf-8"))
+        except RecursionError:
+            # JSON nested too deep to decode is no answer.
+            return None
         return value if isinstance(value, dict) else None
     finally:
         connection.close()
 
 
-def page(session_id):
-    if not SESSION_ID.match(session_id):
-        emit({"none": "session"})
-        return
+def server_record():
+    """The port, token and pid of this home's Walkr server record, or None."""
     try:
         folder = walk((".human-review",))
     except Absent:
-        emit({"none": "record"})
-        return
+        return None
     try:
         data = read_file("server.json", folder, SERVER_LIMIT, SERVER_LIMIT)
     except OSError:
@@ -265,7 +277,7 @@ def page(session_id):
         os.close(folder)
     try:
         record = json.loads(data.decode("utf-8")) if data is not None else None
-    except ValueError:
+    except (ValueError, RecursionError):
         record = None
     port = record.get("port") if isinstance(record, dict) else None
     token = record.get("token") if isinstance(record, dict) else None
@@ -278,21 +290,86 @@ def page(session_id):
         or not 0 < len(token) <= 1024
         or record.get("protocol") != PROTOCOL
     ):
+        return None
+    return port, token, pid
+
+
+def healthy(port, pid, timeout=5):
+    """Whether `/health` names the record's pid and protocol, as Walkr
+    itself checks before it reuses a server. It sends no token."""
+    health = ask(port, "/health", timeout=timeout)
+    return (
+        health is not None
+        and health.get("ok") is True
+        and health.get("protocol") == PROTOCOL
+        and whole(health.get("pid"))
+        and health.get("pid") == pid
+    )
+
+
+class Late(BaseException):
+    """The time of an optional step is over. A BaseException, so no handler
+    of the step itself takes it for one of its own failures."""
+
+
+def give_up(*_):
+    raise Late()
+
+
+def within(seconds, work):
+    """`work()`, or None when it takes longer than `seconds` in all. Its
+    one-shot timer replaces the deadline alarm only while it runs; the
+    alarm then goes back for the time left to DEADLINE."""
+    try:
+        signal.signal(signal.SIGALRM, give_up)
+        signal.setitimer(signal.ITIMER_REAL, seconds)
+        try:
+            return work()
+        finally:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+    except Late:
+        return None
+    finally:
+        signal.signal(signal.SIGALRM, out_of_time)
+        left = DEADLINE - time.monotonic()
+        if left <= 0:
+            out_of_time()
+        signal.setitimer(signal.ITIMER_REAL, left)
+
+
+def probe():
+    record = server_record()
+    return record is not None and healthy(record[0], record[2], 2)
+
+
+def live_server():
+    """Whether the Walkr server of the record answers: the record and
+    `/health` together get at most 2 seconds, and less when the deadline is
+    near. Any failure, the end of that time included, counts as no live
+    server."""
+    left = DEADLINE - time.monotonic() - 1
+    if left <= 0:
+        return False
+    try:
+        return within(min(2, left), probe) is True
+    except (OSError, ValueError, RecursionError, http.client.HTTPException):
+        return False
+
+
+def page(session_id):
+    if session_id is not None and not SESSION_ID.match(session_id):
+        emit({"none": "session"})
+        return
+    record = server_record()
+    if record is None:
         emit({"none": "record"})
         return
+    port, token, pid = record
     # Walkr's server computes its root from the home as given, not its real path.
     root = os.path.join(os.path.expanduser("~"), ".local", ".walkr", "compare")
     try:
-        # The token goes only to the Walkr server of the record: its pid and
-        # protocol, as Walkr itself checks before it reuses a server.
-        health = ask(port, "/health")
-        if (
-            health is None
-            or health.get("ok") is not True
-            or health.get("protocol") != PROTOCOL
-            or not whole(health.get("pid"))
-            or health.get("pid") != pid
-        ):
+        # The token goes only to the Walkr server of the record.
+        if not healthy(port, pid):
             emit({"none": "server"})
             return
         capabilities = ask(port, "/_walkr/compare/api/capabilities", token)
@@ -311,7 +388,8 @@ def page(session_id):
     if not isinstance(path, str) or not PAGE_PATH.match(path):
         emit({"none": "server"})
         return
-    emit({"page": "http://127.0.0.1:%d%s#%s" % (port, path, session_id)})
+    fragment = "" if session_id is None else "#" + session_id
+    emit({"page": "http://127.0.0.1:%d%s%s" % (port, path, fragment)})
 
 
 def main():
@@ -322,6 +400,8 @@ def main():
         list_sessions()
     elif len(mode) == 2 and mode[0] == "page":
         page(mode[1])
+    elif mode == ["page"]:
+        page(None)
     else:
         sys.exit(2)
 

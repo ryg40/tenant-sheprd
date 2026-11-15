@@ -41,7 +41,7 @@ pub(crate) fn newest(waiting: &Waiting) -> Option<Page<'_>> {
                 created: newest.created,
                 id: &newest.id,
                 machine: &host.machine,
-                repo: tally.repo.as_deref(),
+                repo: newest.repo.as_deref(),
             })
         })
         .max_by(|a, b| (a.created, a.id).cmp(&(b.created, b.id)))

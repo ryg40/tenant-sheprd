@@ -672,6 +672,7 @@ pub(crate) fn fixture_window(window: &mut Window, cx: &mut Context<SheprdWindow>
         code_indexes: Default::default(),
         orchestrators: Default::default(),
         orchestrator_live: Default::default(),
+        orchestrator_repos: Default::default(),
         next_orchestrator: 0,
         orchestrator_events: Vec::new(),
         orchestrator_sampling: false,

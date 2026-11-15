@@ -12,7 +12,12 @@ use gpui::App;
 pub(super) fn serve(call: Call<OrchestratorOp>, cx: &mut App) -> Response {
     let cursor = match &call.op {
         OrchestratorOp::Board { cursor } => cursor.clone(),
-        OrchestratorOp::BoardOrder { .. } | OrchestratorOp::BoardMove { .. } => None,
+        OrchestratorOp::BoardOrder { .. }
+        | OrchestratorOp::BoardMove { .. }
+        | OrchestratorOp::BoardRank { .. } => None,
+        OrchestratorOp::Repos | OrchestratorOp::ReposSet { .. } => {
+            return super::repos::serve(call, cx);
+        }
     };
     let cursor = match cursor.as_deref().map(parse_cursor).transpose() {
         Ok(cursor) => cursor,
@@ -63,6 +68,43 @@ pub(super) fn serve(call: Call<OrchestratorOp>, cx: &mut App) -> Response {
                     },
                     error.localize(),
                 ),
+            };
+        }
+        if let OrchestratorOp::BoardRank { lane, items } = &call.op {
+            use crate::orchestrator::view::kanban::{error::Error, order};
+            let Some(lane) = order::parse(lane) else {
+                return Response::error(ErrorCode::NotFound, fl!("kanban-order-unknown"));
+            };
+            if view.menu.page.is_some() || cx.has_active_drag() {
+                return Response::error(ErrorCode::Busy, fl!("kanban-order-busy"));
+            }
+            let result = board.update(cx, |board, cx| {
+                board.set_kanban_mapping(&view.config.kanban, cx);
+                let _ = board.request_board(cx);
+                board.rank_lane(&lane, items, cx)
+            });
+            return match result {
+                Ok(()) => {
+                    view.collect_lane_order(&board, cx);
+                    Response::Done {
+                        message: fl!("kanban-rank-queued"),
+                    }
+                }
+                Err(Error::Pending) => pending(),
+                Err(error) => match error {
+                    Error::Busy => Response::error(ErrorCode::Busy, error.localize()),
+                    Error::UnknownLane => Response::error(ErrorCode::NotFound, error.localize()),
+                    Error::UnknownCard => {
+                        Response::error(ErrorCode::NotFound, fl!("kanban-rank-unknown"))
+                    }
+                    Error::RankLimit => {
+                        Response::error(ErrorCode::InvalidRequest, error.localize())
+                    }
+                    Error::OrderLimit => {
+                        Response::error(ErrorCode::InvalidRequest, fl!("kanban-rank-invalid"))
+                    }
+                    _ => Response::error(ErrorCode::Failed, error.localize()),
+                },
             };
         }
         if let OrchestratorOp::BoardOrder { lane, before } = &call.op {

@@ -1,4 +1,5 @@
 mod history;
+mod rank;
 mod refresh;
 
 use super::*;
@@ -92,12 +93,14 @@ fn kanban_pages_bound_encoded_data_and_cut_an_oversized_title() {
                 worker: "test".into(),
                 snapshot: snapshot(items),
                 account: None,
+                live: Default::default(),
             }],
             Mappings::default(),
             board_rows::Filter {
                 query: String::new(),
                 projects: Default::default(),
                 backends: Default::default(),
+                repos: None,
             },
             1,
             None,

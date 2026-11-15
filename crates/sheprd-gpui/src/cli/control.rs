@@ -3,6 +3,7 @@
 //! CLI already drives workspaces, tabs, panes, agents, and notifications;
 //! these cover what only this client knows or draws.
 mod app;
+mod artifacts;
 mod batch;
 mod browser;
 mod chat;
@@ -12,6 +13,7 @@ mod hosts;
 mod kanban;
 mod mods;
 mod remote;
+mod repos;
 mod settings;
 mod tabs;
 mod walkr;
@@ -21,6 +23,7 @@ use super::CliError;
 pub(crate) use super::args::Args;
 pub use crate::control::{Cursor, EventKind, FontSize, Script, Size, Sound, Switch, ZoomChange};
 pub use app::{AppCommand, UiCommand, WindowCommand};
+pub use artifacts::ArtifactsCommand;
 pub use batch::BatchCommand;
 pub use browser::{BrowserCommand, Placement};
 pub use chat::ChatCommand;
@@ -58,6 +61,8 @@ pub enum ControlCommand {
     Help(Option<&'static str>),
     Status,
     Walkr(WalkrCommand),
+    /// The local artifact server, through the user's `artifacts` program.
+    Artifacts(ArtifactsCommand),
     Skill,
     Browser(BrowserCommand),
     App(AppCommand),
@@ -241,6 +246,10 @@ pub const FAMILIES: &[(&str, &str)] = &[
         "walkr",
         "Connect a running Walkr to its section, and check that it answers",
     ),
+    (
+        "artifacts",
+        "The local artifact server: status, open its page, ask to start or stop it",
+    ),
     ("theme", "List or choose a color theme"),
     ("font", "List or choose the terminal font"),
     ("language", "The language Sheprd shows, or choose one"),
@@ -413,6 +422,7 @@ fn command(family: &'static str, args: &mut Args) -> Result<ControlCommand, CliE
         }
         "config" => ControlCommand::Config(settings::config(args)?),
         "walkr" => ControlCommand::Walkr(walkr::command(args)?),
+        "artifacts" => ControlCommand::Artifacts(artifacts::command(args)?),
         "theme" => ControlCommand::Theme(settings::theme(args)?),
         "font" => ControlCommand::Font(settings::theme(args)?),
         "language" => ControlCommand::Language(settings::language(args)?),

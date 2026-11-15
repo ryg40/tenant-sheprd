@@ -35,17 +35,18 @@ impl SheprdWindow {
             #[cfg(embedded_pages)]
             self.show_walkr_page(window, cx);
         } else if waits && !run {
-            self.open_waiting_walkr_page(Machine::Local, id, window, cx);
+            self.open_waiting_walkr_page(Machine::Local, Some(id), window, cx);
         }
     }
 
     /// Opens the page of session `id` of `machine`, this computer or an SSH
-    /// host, in the section. Its state shows in the section while it opens,
+    /// host, in the section; with no `id`, the Compare page of the host's
+    /// live Walkr server. Its state shows in the section while it opens,
     /// and when it fails.
     pub(crate) fn open_waiting_walkr_page(
         &mut self,
         machine: Machine,
-        id: String,
+        id: Option<String>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -73,7 +74,7 @@ impl SheprdWindow {
         let attempt = tunnel::Attempt::default();
         let task = cx.background_executor().spawn(async move {
             let cancelled = AtomicBool::new(false);
-            let page = remote::page(&host, &id, remote::DEADLINE, &cancelled)?;
+            let page = remote::page(&host, id.as_deref(), remote::DEADLINE, &cancelled)?;
             // This computer's server needs no tunnel.
             let Some(target) = target else {
                 tracing::debug!(port = page.port(), "Read the address of a local Walkr page");

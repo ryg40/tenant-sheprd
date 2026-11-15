@@ -28,6 +28,8 @@ mod code_group;
 mod code_host;
 mod code_start;
 mod code_view;
+#[cfg(embedded_pages)]
+mod document;
 mod editor;
 #[cfg(servo_pages)]
 pub(crate) mod engine;
@@ -80,6 +82,8 @@ mod underlay;
 mod view;
 #[cfg(test)]
 mod view_tests;
+#[cfg(embedded_pages)]
+mod walkr_session;
 mod zoom;
 
 #[cfg(embedded_pages)]
@@ -118,6 +122,8 @@ pub(crate) use underlay::{
 };
 pub(crate) use view::present::Overlay;
 pub(crate) use view::{Browser, PageOpened, scope};
+#[cfg(embedded_pages)]
+pub(crate) use walkr_session::SessionPage;
 pub(crate) use zoom::Zoom;
 
 /// Whether this build can show a page inside the window. Elsewhere a browser

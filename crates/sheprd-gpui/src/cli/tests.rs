@@ -1,6 +1,7 @@
 use super::*;
 use control::BrowserCommand;
 
+mod artifacts;
 mod automation;
 mod browser_clear_data;
 mod browser_zoom;

@@ -22,6 +22,9 @@ pub(in crate::orchestrator::view) struct CardDrag {
 pub(in crate::orchestrator::view) struct State {
     pub active: Option<LaneDrag>,
     pub active_card: Option<CardDrag>,
+    /// The boundary a drop in the card's own cell would place it at: 0 is
+    /// above the first card and the cell's length is below the last.
+    card_slot: Option<usize>,
     card_target: Option<(LaneKey, sheprd_control_protocol::BoardColumn)>,
     card_wash: motion::Toggle,
     gaps: HashMap<Option<LaneKey>, motion::Toggle>,
@@ -34,6 +37,7 @@ impl State {
     pub fn cancel(&mut self) {
         self.active = None;
         self.active_card = None;
+        self.card_slot = None;
         self.card_wash.set(false, motion::now(), false);
         // A committed drop still uses the old rows until preparation installs it.
         if self.pending.is_some() {
@@ -183,7 +187,9 @@ impl OrchestratorView {
         let now = motion::now();
         let state = &self.kanban.drag;
         let lane_index = match self.kanban.lines.get(index) {
-            Some(rows::Line::Header(lane) | rows::Line::Cards { lane, .. }) => *lane,
+            Some(
+                rows::Line::Header(lane) | rows::Line::Facts(lane) | rows::Line::Cards { lane, .. },
+            ) => *lane,
             None => usize::MAX,
         };
         let rank = |key: Option<&LaneKey>| {
@@ -263,7 +269,31 @@ impl OrchestratorView {
         div().w_full().child(row).into_any_element()
     }
 
-    pub(super) fn card_handle(&self, card: &rows::Card, cx: &mut Context<Self>) -> AnyElement {
+    /// The grip a draggable card shows; the whole card is the drag source.
+    pub(super) fn card_handle(&self, _: &rows::Card, _: &mut Context<Self>) -> AnyElement {
+        let grip = div()
+            .w(px(8.))
+            .flex_none()
+            .flex()
+            .flex_wrap()
+            .gap(px(2.))
+            .children((0..6).map(|_| {
+                div()
+                    .size(px(2.))
+                    .rounded_full()
+                    .bg(rgb(self.look.theme.muted))
+            }));
+        grip.into_any_element()
+    }
+
+    pub(super) fn card_drag(
+        &self,
+        body: Stateful<Div>,
+        card: &rows::Card,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        // Every card can be reordered in its cell; only a movable one can
+        // propose a move to another column.
         let drag = CardDrag {
             board: cx.entity_id(),
             card: card.domain.key.clone(),
@@ -271,25 +301,8 @@ impl OrchestratorView {
         };
         let view = cx.entity();
         let look = self.look.clone();
-        let title = card.name.clone();
-        let handle = div()
-            .id(SharedString::from(format!("move-{}", card.summary.key)))
-            .role(Role::Button)
-            .aria_label(fl!("kanban-move-menu"))
-            .w(px(18.))
-            .h_full()
-            .flex_none()
-            .flex()
-            .items_center()
-            .child(
-                self.look
-                    .icon("icons/kanban.svg", 12., self.look.theme.muted),
-            );
-        if !card.summary.can_move {
-            return handle.into_any_element();
-        }
-        handle
-            .cursor(CursorStyle::OpenHand)
+        let title: SharedString = card.summary.title.clone().into();
+        body.cursor(CursorStyle::OpenHand)
             .on_drag(drag, move |drag, _, window, cx| {
                 view.update(cx, |this, cx| {
                     this.kanban.drag.cancel();
@@ -330,6 +343,7 @@ impl OrchestratorView {
         lane: LaneKey,
         column: sheprd_control_protocol::BoardColumn,
         row: usize,
+        shown: usize,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let target = (lane.clone(), column);
@@ -341,7 +355,45 @@ impl OrchestratorView {
         };
         let moving = wash.moving(motion::now());
         let hover_lane = lane.clone();
-        cell.bg(rgb(self.look.theme.primary_wash()).opacity(amount))
+        // A boundary paints above the card below it, or below the last card.
+        let boundary = |at: usize| {
+            if self.kanban.drag.card_target.as_ref() == Some(&target)
+                && self.kanban.drag.card_slot == Some(at)
+            {
+                wash.shown(motion::now())
+            } else {
+                0.
+            }
+        };
+        let slot = if row < shown { boundary(row) } else { 0. };
+        let below = if row + 1 == shown {
+            boundary(shown)
+        } else {
+            0.
+        };
+        let reorder = self
+            .kanban
+            .drag
+            .active_card
+            .as_ref()
+            .is_some_and(|drag| self.reorders(drag, column));
+        let amount = if reorder { 0. } else { amount };
+        let primary = rgb(self.look.theme.primary());
+        cell.relative()
+            .when(below > 0., |el| {
+                el.child(
+                    div()
+                        .absolute()
+                        .bottom_0()
+                        .left_0()
+                        .right_0()
+                        .h(px(2.))
+                        .bg(primary.opacity(below)),
+                )
+            })
+            .bg(rgb(self.look.theme.primary_wash()).opacity(amount))
+            .border_t_2()
+            .border_color(rgb(self.look.theme.primary()).opacity(slot))
             .when(moving, |el| {
                 el.on_children_prepainted(|_, window, _| window.request_animation_frame())
             })
@@ -354,9 +406,15 @@ impl OrchestratorView {
             .on_drag_move(
                 cx.listener(move |this, event: &DragMoveEvent<CardDrag>, _, cx| {
                     if event.bounds.contains(&event.event.position) {
+                        let drag = event.drag(cx);
+                        let reorder = this.reorders(drag, column);
                         let valid = this
-                            .validate_card_drag(event.drag(cx), cx.entity_id(), &hover_lane)
-                            .is_ok();
+                            .validate_card_drag(drag, cx.entity_id(), &hover_lane)
+                            .is_ok()
+                            && (reorder || this.movable(drag));
+                        let lower = event.event.position.y > event.bounds.center().y;
+                        let boundary = (row + usize::from(lower)).min(shown);
+                        this.kanban.drag.card_slot = reorder.then_some(boundary);
                         this.kanban.drag.card_target = Some((hover_lane.clone(), column));
                         this.kanban.drag.card_wash.set(valid, motion::now(), false);
                         cx.notify();
@@ -364,7 +422,19 @@ impl OrchestratorView {
                 }),
             )
             .on_drop(cx.listener(move |this, drag: &CardDrag, window, cx| {
-                let result = this.drop_card(drag, &lane, column, window, cx);
+                // A drop in the card's own cell reorders it; another column
+                // stays the move proposal with its confirmation.
+                let result = if this.reorders(drag, column) {
+                    let boundary = this
+                        .kanban
+                        .drag
+                        .card_slot
+                        .filter(|_| this.kanban.drag.card_target.as_ref() == Some(&target))
+                        .unwrap_or(row.min(shown));
+                    this.drop_rank(drag, &lane, boundary, cx)
+                } else {
+                    this.drop_card(drag, &lane, column, window, cx)
+                };
                 this.kanban.drag.cancel();
                 if let Err(error) = result {
                     this.kanban.error = Some(error);
@@ -372,6 +442,36 @@ impl OrchestratorView {
                 cx.notify();
             }))
             .into_any_element()
+    }
+
+    fn dragged(&self, drag: &CardDrag) -> Option<&rows::Card> {
+        self.kanban.card(&drag.card.item.canonical())
+    }
+
+    fn reorders(&self, drag: &CardDrag, column: sheprd_control_protocol::BoardColumn) -> bool {
+        self.dragged(drag).is_some_and(|card| {
+            sheprd_control_protocol::BoardColumn::ALL.get(card.column) == Some(&column)
+        })
+    }
+
+    fn movable(&self, drag: &CardDrag) -> bool {
+        self.dragged(drag).is_some_and(|card| card.summary.can_move)
+    }
+
+    /// Drops the dragged card at `boundary` of its cell, the boundary the
+    /// board painted.
+    pub(in crate::orchestrator::view) fn drop_rank(
+        &mut self,
+        drag: &CardDrag,
+        lane: &LaneKey,
+        boundary: usize,
+        cx: &mut Context<Self>,
+    ) -> Result<(), error::Error> {
+        self.validate_card_drag(drag, cx.entity_id(), lane)?;
+        let source = self.dragged(drag).map(|card| card.row);
+        self.kanban.drag.active_card = None;
+        let to = source.map_or(boundary, |source| insertion(boundary, source));
+        self.rank_card(&drag.card.item.canonical(), to, cx)
     }
 
     pub(in crate::orchestrator::view) fn drop_card(
@@ -432,5 +532,15 @@ impl OrchestratorView {
             ));
             window.request_animation_frame();
         }
+    }
+}
+
+/// The place in the cell, after the dragged card leaves it, that a drop on
+/// `boundary` (0 above the first card) gives the card at `source`.
+fn insertion(boundary: usize, source: usize) -> usize {
+    if source < boundary {
+        boundary - 1
+    } else {
+        boundary
     }
 }

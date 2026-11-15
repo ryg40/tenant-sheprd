@@ -300,7 +300,6 @@ orchestrator-on-host = on { $host }
 orchestrator-this-machine = this machine
 orchestrator-close = Close
 orchestrator-cancel = Cancel
-orchestrator-dispatch = Dispatch
 orchestrator-section-prompt = PROMPT
 orchestrator-section-agent = AGENT
 orchestrator-section-role = ROLE

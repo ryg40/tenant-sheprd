@@ -41,6 +41,7 @@ menu-page-move-pane = Move pane
 menu-page-move-tab = Move tab
 menu-page-open-checkout = Open checkout
 menu-page-open-link = Open link
+menu-page-artifacts = Artifact server
 menu-page-command-palette = Command palette
 menu-page-pane = Pane
 menu-page-processes = Processes

@@ -49,6 +49,9 @@ pub(crate) struct Pages {
     builds: u64,
     /// Only reports from this instance may change the Walkr section.
     walkr: Option<u64>,
+    /// Only reports from this instance may change the page of a saved
+    /// Walkr session.
+    walkr_session: Option<u64>,
     shown: Vec<TabId>,
     /// Where each page drew in the frame being drawn.
     drawn: Drawn,
@@ -80,6 +83,7 @@ impl Default for Pages {
             building: HashMap::new(),
             builds: 0,
             walkr: None,
+            walkr_session: None,
             shown: Vec::new(),
             drawn: Drawn::default(),
             outbox: Outbox {
@@ -110,6 +114,13 @@ struct Outbox {
     /// at most one entry per popup.
     #[cfg(target_os = "macos")]
     closed: Arc<Mutex<HashSet<u64>>>,
+}
+
+/// Whether page `id` keeps nothing on disk, and on Windows is built only
+/// on a runtime that proves it: the Walkr section's pages. A run's address
+/// may hold its secret, and a saved record is the user's own text.
+pub(super) fn private_page(id: TabId) -> bool {
+    id == TabId::WALKR || id == TabId::WALKR_SESSION
 }
 
 /// Hands the preview scheme's answer to the page that asked.
@@ -277,7 +288,7 @@ impl Pages {
             | Location::Devices
             | Location::CoreTerminal { .. } => None,
         };
-        self.make(tab.id, location.page_url(), root, window, cx)
+        self.make(tab.id, location.page_url(), root, None, window, cx)
     }
 
     /// Creates the Walkr section's page at `address` if the window has none
@@ -289,8 +300,42 @@ impl Pages {
         window: &mut Window,
         cx: &mut Context<SheprdWindow>,
     ) -> crate::Result<()> {
-        self.make(TabId::WALKR, address.expose().to_owned(), None, window, cx)
-            .map_err(|error| crate::walkr::Error::PageConstruction(Box::new(error)).into())
+        self.make(
+            TabId::WALKR,
+            address.expose().to_owned(),
+            None,
+            None,
+            window,
+            cx,
+        )
+        .map_err(|error| crate::walkr::Error::PageConstruction(Box::new(error)).into())
+    }
+
+    /// Creates page `id` at `url`, showing the app's own `document`, if the
+    /// window has none and builds none. It has no tab and no folder.
+    pub(crate) fn ensure_document(
+        &mut self,
+        id: TabId,
+        url: String,
+        document: &super::document::Document,
+        window: &mut Window,
+        cx: &mut Context<SheprdWindow>,
+    ) -> crate::Result<()> {
+        self.make(id, url, None, Some(document.clone()), window, cx)
+    }
+
+    /// Loads `url` in page `id`; whether the window has the page built.
+    pub(crate) fn load_document(&mut self, id: TabId, url: String) -> bool {
+        let Some(page) = self.pages.get(&id) else {
+            return false;
+        };
+        #[cfg(windows)]
+        let url = super::document::webview2_url(&url);
+        if let Err(error) = page.raw().load_url(&url) {
+            tracing::debug!(%error, "Browser navigation failed");
+            return false;
+        }
+        true
     }
 
     /// Creates tab `id`'s page at `url`, unless the window has it or builds
@@ -300,6 +345,7 @@ impl Pages {
         id: TabId,
         url: String,
         root: Option<std::path::PathBuf>,
+        document: Option<super::document::Document>,
         window: &mut Window,
         cx: &mut Context<SheprdWindow>,
     ) -> crate::Result<()> {
@@ -326,6 +372,9 @@ impl Pages {
         let source = if id == TabId::WALKR {
             self.walkr = Some(self.builds);
             Source::Walkr(self.builds)
+        } else if id == TabId::WALKR_SESSION {
+            self.walkr_session = Some(self.builds);
+            Source::WalkrSession(self.builds)
         } else {
             Source::Tab(id)
         };
@@ -333,11 +382,17 @@ impl Pages {
             .with_initialization_script(bridge)
             // The Walkr section's address may hold the secret of a run, so
             // its page keeps nothing on disk: no history, cache, or cookies.
-            // Every other page keeps the shared profile.
-            .with_incognito(id == TabId::WALKR)
+            // The page of a saved session keeps nothing either. Every other
+            // page keeps the shared profile.
+            .with_incognito(private_page(id))
             .with_asynchronous_custom_protocol(
                 PREVIEW_SCHEME.into(),
                 move |_, request, responder| {
+                    if let Some(document) = &document {
+                        let refused = super::preview::from_the_web(&request);
+                        respond(responder, document.answer(request.uri().path(), refused));
+                        return;
+                    }
                     let root = root
                         .as_deref()
                         .filter(|_| !super::preview::from_the_web(&request));
@@ -367,8 +422,11 @@ impl Pages {
         {
             let _ = handle;
             // A retired async build must neither load its address nor cover
-            // the window. Only the accepted build receives the address.
-            let (builder, pending_url) = if id == TabId::WALKR {
+            // the window. Only the accepted build receives the address, and
+            // a private page only once the runtime proves it private. wry
+            // maps the preview scheme only for the address it builds with.
+            let (builder, pending_url) = if private_page(id) {
+                let url = super::document::webview2_url(&url);
                 (builder.with_visible(false).with_focused(false), Some(url))
             } else {
                 (builder.with_url(url), None)
@@ -527,6 +585,9 @@ impl Pages {
         if id == TabId::WALKR {
             self.walkr = None;
         }
+        if id == TabId::WALKR_SESSION {
+            self.walkr_session = None;
+        }
         #[cfg(target_os = "macos")]
         {
             self.adopted.retain(|_, tab| *tab != id);
@@ -679,6 +740,9 @@ impl Pages {
             let resolved = event.resolve(|source| match source {
                 Source::Tab(id) => Some(id),
                 Source::Walkr(number) => (self.walkr == Some(number)).then_some(TabId::WALKR),
+                Source::WalkrSession(number) => {
+                    (self.walkr_session == Some(number)).then_some(TabId::WALKR_SESSION)
+                }
                 #[cfg(target_os = "macos")]
                 Source::Popup(key) => self.adopted.get(&key).copied(),
             });

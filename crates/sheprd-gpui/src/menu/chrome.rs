@@ -773,6 +773,8 @@ impl SheprdWindow {
             panel = panel.child(self.render_worktree_script(cx));
         } else if page == Page::OpenLink {
             panel = panel.child(self.render_open_link(cx));
+        } else if page == Page::Artifacts {
+            panel = panel.child(self.render_artifacts(cx));
         } else if page == Page::PortSignal {
             panel = panel.child(self.render_port_signal(cx));
         } else if let Some(body) = self.browser_data_page(cx) {

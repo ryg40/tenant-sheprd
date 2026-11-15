@@ -78,8 +78,18 @@ pub enum OrchestratorCommand {
         lane: String,
         before: Option<String>,
     },
+    BoardRank {
+        lane: String,
+        items: Vec<String>,
+    },
     Open {
         repo: Option<PathBuf>,
+    },
+    /// The repositories listed, and which the sections show.
+    Repos,
+    /// Shows only `keys`, or every repository for `None`.
+    ReposSet {
+        keys: Option<Vec<String>>,
     },
     /// The issues and pull requests the orchestrator last synced, read from
     /// its local database.
@@ -138,6 +148,7 @@ pub(super) fn orchestrator(args: &mut Args) -> Result<OrchestratorCommand, CliEr
             return Ok(OrchestratorCommand::Open { repo });
         }
         Some("board") => return super::kanban::parse(args, repo.is_some(), forgejo.is_some()),
+        Some("repos") => return super::repos::parse(args, repo.is_some(), forgejo.is_some()),
         Some("items") => Items::All,
         Some("issues") => Items::Issues,
         Some("prs") => Items::PullRequests,

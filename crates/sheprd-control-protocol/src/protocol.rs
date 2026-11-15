@@ -3,6 +3,7 @@
 //! flat form; every other family sends `{"method", "caller", "op"}` with a
 //! family-specific `op`, and is answered with a family-specific `reply`.
 pub mod app;
+pub mod artifacts;
 pub mod chat;
 pub mod cloud;
 pub mod events;
@@ -42,7 +43,15 @@ pub enum Placement {
 /// 22: `ports prune` asks to stop the servers whose panes are closed.
 /// 23: `orchestrator` `board move` opens native confirmation, never approves it.
 /// 24: walkr status sessions give the waiting count of each counted host.
-pub const PROTOCOL_VERSION: u32 = 24;
+/// 25: `orchestrator repos` lists and sets the active repositories.
+/// 26: `orchestrator` `board rank` and each board card's `rank`.
+/// 27: walkr status sessions name a live Walkr server of an SSH host.
+/// 28: joins the board rank of 26 and the live Walkr server of 27.
+/// 29: joins the repository selection of 25 with 28.
+/// 30: `walkr clear` takes the waiting sessions out of the count.
+/// 31: `artifacts` status, start, off, and open.
+/// 32: `artifacts` status names the button's page apart (`opens`).
+pub const PROTOCOL_VERSION: u32 = 32;
 
 /// Older apps and clients know only tabs, so a tab is left off the wire.
 fn is_tab(placement: &Placement) -> bool {
@@ -102,6 +111,8 @@ pub enum Request {
     Files(Call<files::FilesOp>),
     #[serde(rename = "orchestrator")]
     Orchestrator(Call<orchestrator::OrchestratorOp>),
+    #[serde(rename = "artifacts")]
+    Artifacts(Call<artifacts::ArtifactsOp>),
 }
 
 /// A `herdr-gpui://` link the shell started a second copy of the app with.
@@ -134,6 +145,7 @@ impl Request {
             Self::Remote(call) => call.op.wait_seconds(),
             Self::Walkr(_) => walkr::WAIT_SECONDS,
             Self::Files(call) => call.op.wait_seconds(),
+            Self::Artifacts(_) => artifacts::WAIT_SECONDS,
             _ => 0,
         };
         wait.min(MAX_WAIT_SECONDS)
@@ -326,6 +338,9 @@ pub enum Response {
     },
     Orchestrator {
         reply: orchestrator::BoardReply,
+    },
+    Artifacts {
+        reply: artifacts::Reply,
     },
     Error {
         code: ErrorCode,

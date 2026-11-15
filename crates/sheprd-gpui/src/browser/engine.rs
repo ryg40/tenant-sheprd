@@ -185,6 +185,9 @@ pub(super) struct Open {
     pub(super) url: String,
     /// The folder a local page may read, which it keeps wherever it goes.
     pub(super) root: Option<PathBuf>,
+    /// The document of the app's own making that the page shows, in place
+    /// of a folder.
+    pub(super) document: Option<super::document::Document>,
     /// Whether the page gets the bridge: only a local page does.
     pub(super) bridge: bool,
     pub(super) light: Option<bool>,

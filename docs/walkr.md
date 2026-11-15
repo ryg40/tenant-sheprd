@@ -9,7 +9,7 @@ Walkr on the activity bar or run `sheprd ui panel walkr` to show the section.
 
 ## When the icon shows
 
-The Walkr icon is last on the activity bar whenever the activity bar is on
+Walkr is the last section of the activity bar whenever the activity bar is on
 (`[sidebar] activity_bar`). `sheprd ui panel walkr` then always shows the
 section.
 
@@ -23,16 +23,20 @@ the section was last open.
 - **What counts:** each saved Compare session whose `status` is `open`.
   A live run counts through its session: Sheprd's probe asks the run's
   server for `/sdk.js` only, so Sheprd does not know whether an agent waits
-  for feedback, and a run is not counted on its own.
+  for feedback, and a run is not counted on its own. The live Walkr
+  server of an SSH host is not counted either: only its sessions that wait
+  for a pick count. See
+  [The live Walkr server of an SSH host](#the-live-walkr-server-of-an-ssh-host).
 - **Which hosts:** this computer, and each SSH host that the window shows
   (an enabled host whose daemon is connected). A cloud machine, WSL or a
   socket endpoint is not counted.
 - **What is read:** `status`, `createdAt` and `title` of each record, and
-  `repo.name` of the newest waiting one. The bounds are those of the
-  list: at most 5,000 entries of the sessions folder, whatever they hold,
+  `repo.name` of each of the 100 newest waiting ones, so that a click
+  still finds a workspace when newer ones are cleared. The bounds are
+  those of the list: at most 5,000 entries of the sessions folder, whatever they hold,
   no symlink as a folder or a record, and no record over 16 MiB. A row
   reads the first 8 KiB of its record; `repo.name` comes from the first
-  64 KiB of an `open` record. A record that is refused or malformed is
+  64 KiB of an `open` record, read only up to the `repo` field. A record that is refused or malformed is
   skipped, and the others still count. On an SSH host, a record with a
   text field that has no UTF-8 form (a lone surrogate escape) is skipped
   too. A full list of 5,000 sessions counts all 5,000.
@@ -62,10 +66,13 @@ the section was last open.
 - **Failures:** no sessions folder counts 0. A host whose read fails keeps
   its last count, also when its sessions folder cannot be read. The
   section shows the failure on the line of that host, never on the badge.
+- **Clear:** a session that the user cleared does not count. See
+  [Clear](#clear).
 
 The list in the section starts with one line for each counted host and its
 count. The waiting sessions of an SSH host follow its line, with their
-title and time.
+title and time. An SSH host whose Walkr server answers also has a
+**Live Walkr server** row there.
 
 ### A click on the icon
 
@@ -101,9 +108,11 @@ A click on the icon, or on a waiting session in the list, opens that
 session's page in the Walkr section. This is a session of an SSH host, or
 a session of this computer when no live run is connected. The session of
 a live run shows the run's page instead, as before. A session that does
-not wait for a pick (picked, or of another status) shows as text, as
-before. A session of this computer keeps its text while its page opens,
-and when the page cannot open.
+not wait for a pick (picked, or of another status) shows as Sheprd's own
+document of its record; see
+[What a row and a session show](#what-a-row-and-a-session-show). A
+session of this computer keeps that view while its page opens, and when
+the page cannot open.
 
 1. The host's reader program reads the record of the Walkr server of that
    home, `~/.human-review/server.json`, with the same no-follow and
@@ -151,7 +160,7 @@ closed page was of this computer, open or still opening, its session is
 no longer picked, so the section does not fall back to that session's
 text. After a page that failed, the picked session's text stays. A click
 of a session that does not wait also closes the page, and shows that
-session as text.
+session's document.
 
 No command opens this page. `sheprd walkr status` already counts the
 waiting sessions, and an agent on the host has the page's link.
@@ -161,6 +170,76 @@ not an error. The header says **No Walkr run is connected**. The body says
 that a run appears when an agent runs the `/walkr` prompt with the Sheprd
 link on, and that the saved sessions of this computer are listed there. The
 list is on the left; see [History](#history).
+
+### The live Walkr server of an SSH host
+
+`sheprd walkr connect` works only from a pane on this computer, so a Walkr
+server that an agent starts on an SSH host cannot connect a run. The
+Walkr section shows that server instead, through the same tunnel as the
+page of a waiting session.
+
+1. Each list read of an SSH host also reads the host's server record and
+   asks `/health` without the token, with the checks of steps 1 and 2 of
+   [The page of a waiting session](#the-page-of-a-waiting-session). When
+   the record and the answer agree (the same `pid`, `protocol` 9), the
+   reader adds one line that says only that a server answers. No request
+   of a list carries the token, and the line holds no port or address.
+   That check, the read of the record included, has at most 2 seconds in
+   all, and it is skipped when the read has less than 1 second left. When
+   that time ends, or the record or the answer cannot be read, the host
+   has no live server and its session list stays.
+2. The host then has a **Live Walkr server** row under its line in the
+   section. A click opens the private Compare page of that server, with no
+   session in its fragment, through the steps of
+   [The page of a waiting session](#the-page-of-a-waiting-session): the
+   same token checks, the same address checks (and no fragment), the same
+   tunnel on the same port, and the same failure lines.
+3. The row is not a waiting page: the badge does not count it, and a click
+   on the icon does not go to it.
+
+The Compare page lists the Compare sessions of that server. Not supported:
+the review page of a Walkr Core run (`/s/ID`). The Walkr server names that
+page to no client that holds its token, so Sheprd cannot find it. Sheprd
+does not guess such an address. This computer has no such row: a run on
+this computer connects with `sheprd walkr connect`.
+
+### Clear
+
+While a page waits, the list starts with the total and a **Clear** button.
+**Clear** takes every waiting session of every counted host out of the
+count, as the list shows them then. Each waiting row of an SSH host also
+has a button that takes that one session out. `sheprd walkr clear` does
+what **Clear** does.
+
+- A cleared session does not count on the badge, does not show in the
+  waiting list, and a click on the icon does not go to it. It still shows
+  in the history, and its page still opens from there.
+- Sheprd alone forgets it. Nothing is written on an SSH host or into a
+  session file, so its `status` stays `open` there, and another Sheprd or
+  Walkr itself still shows it as waiting.
+- A session that waits later counts as before. There is no undo: a cleared
+  session counts again only when its record leaves the `open` state and
+  waits again.
+- The cleared sessions are kept with the window's other preferences of
+  that daemon, so they stay cleared after a restart. Sheprd keeps the host
+  and the session ID only: `local`, or a hash of the SSH target, never a
+  title, a path, or an address.
+- A cleared session is forgotten when two complete reads of its host in
+  a row do not list it as waiting. One read can miss a record that Walkr
+  rewrites at that moment. A failed read, or one that stopped at the limit
+  of 5,000 entries, forgets nothing, and does not count as one of the two.
+- At most 64 hosts and 20,000 sessions are kept, for all hosts together.
+  At the bound, a clear adds no more sessions and reports only those it
+  added: the rest still count. A host that a window no longer counts is
+  never read, so its cleared sessions stay kept and use part of the bound
+  until the same host counts again.
+- Two windows of one daemon share the stored set. A save keeps the cleared
+  sessions that the other window stored, so a restart loses neither. A
+  window does not see the other window's clears until it starts again.
+- When the newest waiting session is cleared, a click on the icon goes to
+  the next one and to the workspace of its repository. The Walkr icon
+  stays on the bar with a count of 0, as
+  [When the icon shows](#when-the-icon-shows) says.
 
 ## History
 
@@ -240,11 +319,40 @@ or the idle limit. A pick of a waiting row of this computer, with no live
 run, opens its page; see
 [The page of a waiting session](#the-page-of-a-waiting-session). A pick
 of another row that does not wait, or of any row while another run is
-live, shows the session as plain text:
+live, shows the saved session:
 the brief, the questions and answers, each
 option, the pick, the comments, the note, the outcome and the ratings.
-No link is active, no Markdown or HTML is drawn, and nothing is opened or
-run. Text and Markdown options show as plain text, up to 256 KiB each.
+
+On a build with pages (`embedded: true`), the session shows in a page of
+the section, as an HTML document that Sheprd makes from the bounded record.
+It reads like Walkr's Compare page: a card for each option, the picked card
+marked, and each rating as stars with its number, in the window's theme.
+The page has no Walkr server and no other server behind it:
+
+- The record is untrusted text. Sheprd escapes every field, so a title or
+  an option that holds markup shows that markup as text.
+- The document has no script, no link, no form and no image, and loads
+  nothing. Its Content-Security-Policy is `default-src 'none';
+  style-src 'unsafe-inline'`.
+- The page loads the document through the app's private `herdr-preview:`
+  scheme, from memory. The page has no folder, so that scheme serves it
+  this one document and nothing else. No socket listens for it, and no file
+  is written.
+- This page is not the page of a run. A pick never closes a run's page, so
+  **Back to live page** and **Back to the page** work as before. A run's
+  page takes the content back as before.
+- A request of the page for another window opens nothing.
+- Leaving the section hides the page; returning shows it again. Another
+  pick, a pick of a live row, or **Back** closes it.
+
+Until the page has loaded the document, and when the page fails, the
+session shows as plain text in the section, as on a build without pages.
+After a failure, the session stays as text until it is picked again.
+
+In either view no link is active, no Markdown or HTML is drawn, and nothing
+is opened or run. Text and Markdown options show as plain text, up to
+256 KiB each. Markdown options are not rendered: the browser's Markdown
+pages keep web images and links, which this page must not load or follow.
 
 The reader drops the content of an HTML option. The section shows its label,
 its summary and the line "HTML option, N KB. It is drawn only in the live
@@ -259,8 +367,11 @@ rest without constructing them and shows each omitted count.
 The detail first shows the newest 64 ratings. **Show earlier ratings** reads
 64 more each time, until every rating in the bounded record is available.
 Each request counts all ratings but retains only the requested newest ones.
-The view keeps its scroll position during the read and adds earlier ratings
-after the ratings already shown.
+The text view keeps its scroll position during the read and adds earlier
+ratings after the ratings already shown. In the page, the button is in the
+section's header, as the document has no control of its own. The page shows
+the current document during the read. Then it loads a new document that
+opens at the first added rating.
 
 With a run and no pick, the page shows as before. From a session, **Back to
 live page** reopens or returns to the page of a live run.
@@ -294,7 +405,9 @@ sheprd walkr disconnect
 - The app accepts only `http` on `127.0.0.1`, `localhost` or `[::1]`, with a
   port, without user info, in at most 2,048 bytes. Any other address exits 2
   and changes nothing. The command runs in a Herdr pane on this computer; a
-  caller without `HERDR_PANE_ID` exits 1.
+  caller without `HERDR_PANE_ID` exits 1. A Walkr server on an SSH host
+  shows in the section without it; see
+  [The live Walkr server of an SSH host](#the-live-walkr-server-of-an-ssh-host).
 - A `connect` to the same server from another pane adds that pane. With the
   same address the one page stays. With another address of that server the
   run takes the newer address: the open page closes and a new page loads the
@@ -520,7 +633,7 @@ Menus and dialogs use the same page-hiding rules as browser tabs.
 
 ## Command
 
-`sheprd walkr status`, `connect` and `disconnect` accept `--json` and
+`sheprd walkr status`, `connect`, `disconnect` and `clear` accept `--json` and
 `--window ID`, with the usual window targeting: the window of the caller's
 workspace. [Run](#run) describes `connect` and `disconnect`.
 
@@ -528,8 +641,12 @@ workspace. [Run](#run) describes `connect` and `disconnect`.
 the count of saved sessions. JSON contains `connectivity`, `address`,
 `checked_seconds_ago`, `embedded`, `source`, `live` and `sessions`.
 `sessions` holds one entry for each counted host:
-`{"host": "local", "count": N, "waiting": W}` for this computer, then one
-for each SSH host with its SSH target as `host`. `count` is the number of
+`{"host": "local", "count": N, "waiting": W, "live_server": false}` for
+this computer, then one for each SSH host with its SSH target as `host`.
+`live_server` is true when the last read of that SSH host found its Walkr
+server live; see
+[The live Walkr server of an SSH host](#the-live-walkr-server-of-an-ssh-host).
+It is always false for `local`, and it does not change `waiting`. `count` is the number of
 listed rows (at most 100); for an SSH host it is the number of records read,
 at most 100. `waiting` is the number of sessions that wait for a pick; see
 [The count](#the-count). An SSH host that has not answered yet is not
@@ -540,6 +657,10 @@ setting), or `none` when there is neither. `live` is true only
 for a run that a pane holds: an ended run whose page is kept has `source`
 `run` and `live` false. `address` is host and port only.
 `embedded` reports build support for pages, not whether Walkr has a page.
+
+`waiting` counts no session that was cleared; see [Clear](#clear).
+`walkr clear` clears what **Clear** does and answers the number of
+sessions that left the count (JSON: `{"kind": "cleared", "count": N}`).
 
 | Exit | Meaning |
 | --- | --- |
@@ -560,10 +681,10 @@ builds with Servo report `embedded: true`.
 
 | Platform | Section and open action |
 | --- | --- |
-| macOS | The section embeds a private WKWebView below the window's drawing, like a chat page. |
-| Linux with Servo | The section paints the Servo page below its header, like a browser tab. |
-| Linux without Servo | Same states with no page; Open in the system browser for `walkr.url` only. |
-| Windows | The section embeds a private WebView2 above the window's drawing. Menus and dialogs hide covered pages. Runtime behavior is unverified here. |
+| macOS | The section embeds a private WKWebView below the window's drawing, like a chat page. A saved session shows in a second private WKWebView. |
+| Linux with Servo | The section paints the Servo page below its header, like a browser tab. A saved session shows in a second Servo page. |
+| Linux without Servo | Same states with no page; Open in the system browser for `walkr.url` only. A saved session shows as text. |
+| Windows | The section embeds a private WebView2 above the window's drawing. Menus and dialogs hide covered pages. A saved session shows in a second WebView2, which WebView2 spells `http://herdr-preview.localhost/`. Runtime behavior is unverified here. |
 
 macOS: unverified. Windows: unverified. The private page and saved-record
 open have platform-specific code. Compilation, tests, and native window
@@ -583,10 +704,15 @@ tabs are unchanged. On Linux, Servo has one store for every page.
 | Linux without Servo | None; the system browser keeps its own data. |
 | Windows | None on disk: WebView2's private mode (InPrivate). It needs WebView2 Runtime 101.0.1210.39 or later. |
 
+The page of a saved session asks for the same private data store on macOS
+and Windows. A saved record is the user's own text, so it gets the same
+care as a run's page.
+
 On Windows, Sheprd checks the installed WebView2 Runtime before building
-the Walkr page. An older runtime, an unreadable version, or an unknown
-version format refuses the page. Sheprd does not fall back to a persistent
-page.
+the Walkr page or the page of a saved session. An older runtime, an
+unreadable version, or an unknown version format refuses the page: the
+section shows a run's error, and a saved session stays in the text view.
+Sheprd does not fall back to a persistent page.
 
 Not verified on this machine: that no file under the app's data on macOS or
 Windows holds the address after the page closes and the app restarts. The

@@ -87,7 +87,7 @@ pub(super) fn assert_counts_open_only(tally: &Tally) {
         .map(|pending| pending.id.as_str())
         .collect();
     assert_eq!(ids, [OPEN, OLDER_OPEN]);
-    assert_eq!(tally.repo.as_deref(), Some("valuetainme"));
+    assert_eq!(tally.newest[0].repo.as_deref(), Some("valuetainme"));
 }
 
 #[test]

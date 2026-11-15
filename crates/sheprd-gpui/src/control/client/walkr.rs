@@ -20,6 +20,25 @@ pub(super) fn run(command: WalkrCommand, context: &Context) -> crate::Result<Out
             connect(address, show, context)
         }
         WalkrCommand::Disconnect => context.act(Request::Walkr, WalkrOp::Disconnect {}),
+        WalkrCommand::Clear => clear(context),
+    }
+}
+
+fn clear(context: &Context) -> crate::Result<Output> {
+    match context.call(Request::Walkr, WalkrOp::Clear {})? {
+        Response::Walkr {
+            reply: reply @ Reply::Cleared { count },
+        } => {
+            let text = match count {
+                0 => "No Walkr page waited for a pick".to_owned(),
+                1 => "Cleared 1 waiting Walkr page from the count, in Sheprd only".to_owned(),
+                count => {
+                    format!("Cleared {count} waiting Walkr pages from the count, in Sheprd only")
+                }
+            };
+            Output::data(text, &reply)
+        }
+        response => Err(unexpected(response)),
     }
 }
 
@@ -115,6 +134,9 @@ fn sessions_text(sessions: &[HostSessions]) -> String {
             match host.host.as_str() {
                 "local" => format!(
                     "\nSaved Compare sessions on this computer: {count}, waiting for a pick: {waiting}"
+                ),
+                name if host.live_server => format!(
+                    "\nSaved Compare sessions on {name}: {count}, waiting for a pick: {waiting}; a Walkr server answers there"
                 ),
                 name => format!(
                     "\nSaved Compare sessions on {name}: {count}, waiting for a pick: {waiting}"

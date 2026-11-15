@@ -148,3 +148,27 @@ fn an_app_that_draws_nothing_is_not_loading(cx: &mut gpui::TestAppContext) {
     assert!(cx.debug_bounds("mod-app-app00").is_some());
     assert!(cx.debug_bounds("mod-app-loading").is_none());
 }
+
+/// With `[artifacts] url` set, the Artifacts button is listed under Walkr
+/// and over the mod app buttons.
+#[gpui::test]
+fn artifacts_sits_between_walkr_and_the_mod_apps(cx: &mut gpui::TestAppContext) {
+    let (view, cx) = fixture(cx, 1, 700.);
+    view.update(cx, |view, cx| {
+        let url = crate::browser::WebUrl::try_from("http://127.0.0.1:8080/").unwrap();
+        view.config.artifacts.url = Some(url);
+        cx.notify();
+    });
+    draw(cx);
+    let walkr = cx.debug_bounds("activity-walkr").unwrap();
+    let artifacts = cx.debug_bounds("activity-artifacts").unwrap();
+    let app = cx.debug_bounds("activity-mod-app00").unwrap();
+    assert!(
+        walkr.bottom() <= artifacts.top(),
+        "Walkr {walkr:?} should be over Artifacts {artifacts:?}"
+    );
+    assert!(
+        artifacts.bottom() <= app.top(),
+        "Artifacts {artifacts:?} should be over the mod app {app:?}"
+    );
+}

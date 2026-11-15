@@ -16,24 +16,30 @@ pub(in crate::orchestrator::view) struct Input {
     pub worker: String,
     pub snapshot: Snapshot,
     pub account: Option<String>,
+    /// The live agents a card's newest run reports through, as other sections show them.
+    pub live: Arc<Vec<super::super::rows::LiveAgent>>,
 }
 
 pub(in crate::orchestrator::view) struct Filter {
     pub query: String,
     pub projects: HashSet<String>,
     pub backends: HashSet<Provider>,
+    /// The active repositories' keys; `None` shows every one.
+    pub repos: Option<HashSet<String>>,
 }
 
 #[derive(Default)]
 pub(in crate::orchestrator::view) struct LaneOrder {
     pub authoritative: bool,
     pub keys: Vec<LaneKey>,
+    pub ranks: rank::Ranks,
 }
 
 #[derive(Clone)]
 pub(super) struct Card {
     pub active_backed: bool,
     pub domain: projection::Card<usize>,
+    pub face: face::Face,
     pub summary: wire::Card,
     pub name: SharedString,
     pub element_id: SharedString,
@@ -69,7 +75,12 @@ pub(super) struct Lane {
 #[derive(Clone, Copy)]
 pub(super) enum Line {
     Header(usize),
-    Cards { lane: usize, row: usize },
+    /// The lane's history, mapping, and evidence, below its header.
+    Facts(usize),
+    Cards {
+        lane: usize,
+        row: usize,
+    },
 }
 
 pub(super) struct Tracked {
@@ -85,9 +96,12 @@ pub(crate) struct Prepared {
     pub(super) history_notice: Option<SharedString>,
     pub(super) lanes: Vec<Lane>,
     pub(super) loaded: SharedString,
+    /// Every loaded native ID of each listed lane, before filters and caps.
+    pub(super) loaded_ids: HashMap<LaneKey, HashSet<String>>,
     pub(super) order: Vec<LaneKey>,
     pub(crate) pages: Result<Vec<wire::BoardPage>, error::Error>,
     pub(super) partial: bool,
+    pub(super) ranks: rank::Ranks,
     pub(super) roster: Vec<LaneKey>,
     pub(super) routes: Vec<RouteSnapshot>,
     pub(super) selected_routes: HashMap<(LaneKey, String), Route<usize>>,
@@ -398,39 +412,69 @@ pub(in crate::orchestrator::view) fn prepare(
         now,
     );
     let history_loaded = RefCell::new(HashMap::new());
-    let board = projection::project_ordered(roster, records, &mappings, &order, |lane, item| {
-        if let Some(item) = item {
-            history_observations.count(lane, item, &mut history_loaded.borrow_mut());
-        }
-        // Projection has resolved identity and source precedence here, but has
-        // not applied search or display caps. Suppressed copies cannot keep a popup.
-        if let Some(tracked) = &mut *tracked.borrow_mut()
-            && *lane == tracked.key.lane
-            && let Some(item) = item
-            && item.key.native_id == tracked.key.item.native_id
-        {
-            tracked.item = Some(item.clone());
-        }
-        let picked = sources.iter().any(|(source, _, input)| {
-            let pick = if input.account.is_some() {
-                super::super::projects::forgejo_repository(source)
-            } else {
-                input.worker.clone()
-            };
-            (filter.projects.is_empty() || filter.projects.contains(&pick))
-                && (filter.backends.is_empty() || filter.backends.contains(&source.provider))
-                && LaneKey::try_from(source).ok().as_ref() == Some(lane)
-        });
-        if !picked {
-            return false;
-        }
-        let source = lane.source();
-        let text = item
-            .map(|item| searchable(item, &source))
-            .unwrap_or_else(|| format!("{} {}", source.host, source.repository))
-            .to_lowercase();
-        words.iter().all(|word| text.contains(word))
-    })?;
+    let loaded_ids: RefCell<HashMap<LaneKey, HashSet<String>>> = RefCell::new(
+        full_roster
+            .iter()
+            .map(|lane| (lane.clone(), HashSet::new()))
+            .collect(),
+    );
+    let open_ids: RefCell<HashMap<LaneKey, HashSet<String>>> = RefCell::default();
+    let rank_index = lane_order.ranks.index();
+    let rank_of = |lane: &LaneKey, id: &str| rank_index.get(lane)?.get(id).copied();
+    let board =
+        projection::project_ranked(roster, records, &mappings, &order, rank_of, |lane, item| {
+            if let Some(item) = item {
+                history_observations.count(lane, item, &mut history_loaded.borrow_mut());
+                let id = item.key.native_id.clone();
+                if !sheprd_orchestrator::kanban::history::settled(item) {
+                    open_ids
+                        .borrow_mut()
+                        .entry(lane.clone())
+                        .or_default()
+                        .insert(id.clone());
+                }
+                loaded_ids
+                    .borrow_mut()
+                    .entry(lane.clone())
+                    .or_default()
+                    .insert(id);
+            }
+            // Projection has resolved identity and source precedence here, but has
+            // not applied search or display caps. Suppressed copies cannot keep a popup.
+            if let Some(tracked) = &mut *tracked.borrow_mut()
+                && *lane == tracked.key.lane
+                && let Some(item) = item
+                && item.key.native_id == tracked.key.item.native_id
+            {
+                tracked.item = Some(item.clone());
+            }
+            let picked = sources.iter().any(|(source, _, input)| {
+                let pick = if input.account.is_some() {
+                    super::super::projects::forgejo_repository(source)
+                } else {
+                    input.worker.clone()
+                };
+                (filter.projects.is_empty() || filter.projects.contains(&pick))
+                    && (filter.backends.is_empty() || filter.backends.contains(&source.provider))
+                    && LaneKey::try_from(source).ok().as_ref() == Some(lane)
+            }) && filter
+                .repos
+                .as_ref()
+                .is_none_or(|keys| keys.contains(&lane.canonical()));
+            if !picked {
+                return false;
+            }
+            let source = lane.source();
+            let text = item
+                .map(|item| searchable(item, &source))
+                .unwrap_or_else(|| format!("{} {}", source.host, source.repository))
+                .to_lowercase();
+            words.iter().all(|word| text.contains(word))
+        })?;
+    let loaded_ids = loaded_ids.into_inner();
+    let open_ids = open_ids.into_inner();
+    let ranks = lane_order.ranks.reconcile(&full_roster, complete);
+    let numbers = rank::numbers(&ranks, &open_ids);
     let mut prepared = Prepared {
         by_key: HashMap::new(),
         cards: Vec::new(),
@@ -442,9 +486,11 @@ pub(in crate::orchestrator::view) fn prepare(
             loaded = board.cards.loaded
         )
         .into(),
+        loaded_ids,
         order,
         pages: Ok(Vec::new()),
         partial: board.cards.truncated() || board.roster.truncated(),
+        ranks,
         roster: full_roster,
         routes,
         selected_routes: board.selected_routes,
@@ -456,6 +502,17 @@ pub(in crate::orchestrator::view) fn prepare(
     {
         tracked.complete = false;
     }
+    let runs: Vec<_> = inputs
+        .iter()
+        .map(|input| {
+            super::super::rows::Runs::new(
+                &input.snapshot.runs,
+                &input.snapshot.sessions,
+                &input.live,
+            )
+        })
+        .collect();
+    let latest: Vec<_> = runs.iter().map(super::super::rows::Runs::latest).collect();
     let mut wire_lanes = Vec::new();
     let mut totals = vec![0; wire::BoardColumn::ALL.len()];
     for (position, lane) in board.lanes.iter().enumerate() {
@@ -568,6 +625,9 @@ pub(in crate::orchestrator::view) fn prepare(
                     }
                 });
                 let suffix = status.map(move_status::label).unwrap_or(suffix);
+                let number = numbers
+                    .get(&(card.key.lane.clone(), card.item.key.native_id.clone()))
+                    .copied();
                 let summary = wire::Card {
                     key: card.key.item.canonical(),
                     lane: canonical.clone(),
@@ -590,14 +650,36 @@ pub(in crate::orchestrator::view) fn prepare(
                     } else {
                         "unsupported_move".into()
                     },
+                    rank: number,
                 };
-                let name = fl!(
-                    "kanban-card-name",
-                    title = card.item.title.clone(),
-                    source = canonical.clone(),
-                    column = column(cell.column),
-                    status = move_label
-                )
+                let input = &inputs[card.route.worker];
+                let face = face::prepare(
+                    &card.item,
+                    super::super::rows::status_of(&card.item, &input.snapshot.pr_status),
+                    latest[card.route.worker]
+                        .get(card.item.key.canonical().as_str())
+                        .map(|run| run.status),
+                    number,
+                    now,
+                );
+                let name = if face.details.is_empty() {
+                    fl!(
+                        "kanban-card-name",
+                        title = card.item.title.clone(),
+                        source = canonical.clone(),
+                        column = column(cell.column),
+                        status = move_label
+                    )
+                } else {
+                    fl!(
+                        "kanban-card-label",
+                        title = card.item.title.clone(),
+                        source = canonical.clone(),
+                        column = column(cell.column),
+                        status = move_label,
+                        details = face.details.to_string()
+                    )
+                }
                 .into();
                 prepared
                     .by_key
@@ -608,6 +690,7 @@ pub(in crate::orchestrator::view) fn prepare(
                     active_backed: active[card.route.worker]
                         .contains(&(card.key.lane.clone(), card.item.key.native_id.clone())),
                     domain: card.clone(),
+                    face,
                     element_id: format!("kanban-card-{}", summary.key).into(),
                     summary,
                     name,

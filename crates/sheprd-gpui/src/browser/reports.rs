@@ -55,6 +55,8 @@ pub(crate) enum Source {
     Tab(TabId),
     /// The section reuses its tab ID, but each page has its own instance.
     Walkr(u64),
+    /// The page of a saved Walkr session, the same way.
+    WalkrSession(u64),
     #[cfg(target_os = "macos")]
     Popup(u64),
 }

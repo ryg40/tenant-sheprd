@@ -122,4 +122,5 @@ mod open;
 mod ui_agent_group;
 mod ui_panel;
 mod walkr;
+mod walkr_clear;
 mod walkr_connect;

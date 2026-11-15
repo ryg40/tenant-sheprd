@@ -40,6 +40,10 @@ pub(super) fn parse(
             };
             return Ok(OrchestratorCommand::BoardMove { item, lane, to });
         }
+        if verb == "rank" && cursor.is_none() && before.is_none() && lane.is_none() && to.is_none()
+        {
+            return rank(args);
+        }
         if verb != "order" || cursor.is_some() || lane.is_some() || to.is_some() {
             return Err(CliError::Unexpected {
                 command: "orchestrator board",
@@ -66,4 +70,24 @@ pub(super) fn parse(
         return Err(CliError::InvalidValue("--cursor"));
     }
     Ok(OrchestratorCommand::Board { cursor })
+}
+
+/// `board rank LANE [ITEM...]`: canonical keys, distinct, at most a lane's bound.
+fn rank(args: &mut Args) -> Result<OrchestratorCommand, CliError> {
+    use sheprd_control_protocol::protocol::orchestrator::MAX_RANK_ITEMS;
+    let lane = args.required_text("LANE")?;
+    if crate::orchestrator::view::kanban::order::parse(&lane).is_none() {
+        return Err(CliError::InvalidValue("LANE"));
+    }
+    let mut items: Vec<String> = Vec::new();
+    while let Some(item) = args.optional_text()? {
+        let canonical = item
+            .parse::<sheprd_orchestrator::ItemKey>()
+            .is_ok_and(|parsed| parsed.canonical() == item);
+        if !canonical || items.contains(&item) || items.len() == MAX_RANK_ITEMS {
+            return Err(CliError::InvalidValue("ITEM"));
+        }
+        items.push(item);
+    }
+    Ok(OrchestratorCommand::BoardRank { lane, items })
 }

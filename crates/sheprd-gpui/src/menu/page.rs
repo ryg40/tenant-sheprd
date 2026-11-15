@@ -24,6 +24,8 @@ pub(crate) enum Page {
     /// The Linux window's application menu, from the native menu definitions.
     Application,
     AppUpdate,
+    /// Asking before the local artifact server starts or stops.
+    Artifacts,
     /// Approving an automation script, or enabling automations on a host.
     Automation,
     /// The account menu's Azure DevOps tokens, beside GitHub's and GitLab's.
@@ -131,6 +133,7 @@ impl Page {
             self,
             Self::Install
                 | Self::AgentSkill
+                | Self::Artifacts
                 | Self::VersionMismatch
                 | Self::OpenCheckout
                 | Self::OpenLink

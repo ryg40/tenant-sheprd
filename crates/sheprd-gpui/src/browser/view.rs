@@ -331,6 +331,8 @@ impl SheprdWindow {
         #[cfg(embedded_pages)]
         self.poll_walkr_page(std::time::Instant::now(), window, cx);
         #[cfg(embedded_pages)]
+        self.poll_walkr_session_page(window, cx);
+        #[cfg(embedded_pages)]
         self.apply_page_events(window, cx);
         #[cfg(embedded_pages)]
         self.forget_favicons(window, cx);
@@ -457,6 +459,10 @@ impl SheprdWindow {
                 }
             }
             Event::Title(TabId::WALKR, _) | Event::Posted(TabId::WALKR, ..) => {}
+            // The page of a saved session has no tab. Its other reports
+            // change nothing: it has no store entry, and a new window it
+            // asks for opens nothing, as it has no tab to open beside.
+            Event::Loaded(TabId::WALKR_SESSION, url) => self.walkr_session_loaded(&url, cx),
             Event::Title(id, title) => {
                 Store::update(cx, |store| store.visited(id, None, Some(&title)));
             }

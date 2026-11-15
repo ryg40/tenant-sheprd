@@ -33,6 +33,7 @@ mod pr_status;
 mod project_filter;
 mod refresh;
 mod repo_name;
+mod repo_select;
 mod review_requested;
 mod row_start;
 mod rows;

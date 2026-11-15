@@ -735,6 +735,10 @@ impl OrchestratorView {
             .map(|workspace| workspace.branch.clone())
             .unwrap_or_default();
         let (stop_run, remove_run, agent) = (run.id.clone(), run.id.clone(), run.agent.clone());
+        // A confirmation knows what it acts on, so hiding it stops it.
+        let (stop_item, remove_item) = (run.item_key.clone(), run.item_key.clone());
+        let repo = self.repo().map(|repo| repo.key.clone()).unwrap_or_default();
+        let remove_repo = repo.clone();
         // A failed run with no worktree is still forgotten through Remove.
         let removable =
             run.workspace.is_some() || run.state == crate::orchestrator::RunState::Failed;
@@ -784,6 +788,8 @@ impl OrchestratorView {
                             Confirm::Stop {
                                 run: stop_run.clone(),
                                 agent: agent.clone(),
+                                item: stop_item.clone(),
+                                repo: repo.clone(),
                             },
                             cx,
                         );
@@ -802,6 +808,8 @@ impl OrchestratorView {
                             Confirm::Remove {
                                 run: remove_run.clone(),
                                 branch: branch.clone(),
+                                item: remove_item.clone(),
+                                repo: remove_repo.clone(),
                             },
                             cx,
                         );

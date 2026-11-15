@@ -51,6 +51,7 @@ impl OrchestratorView {
             .ready
             .as_ref()
             .is_none_or(|ready| !ready.roster.contains(lane))
+            || !self.lane_shown(lane)
         {
             return Err(error::Error::UnknownLane);
         }
@@ -120,7 +121,10 @@ impl OrchestratorView {
                 .configure(lane.clone(), fresh.context.clone())
                 .map_err(error::Error::Backend)?;
             moves
-                .prepare(proposal, observed, move |_| Ok(fresh))
+                .prepare(proposal, observed, move |_| {
+                    peer.prepared();
+                    Ok(fresh)
+                })
                 .map_err(error::Error::Backend)?
         };
         let focus = cx.focus_handle();
@@ -183,6 +187,10 @@ impl OrchestratorView {
                     service.moves().generation() == dialog.moves.generation()
                 })
         }) {
+            return Err(stale());
+        }
+        // A lane the selection hides confirms nothing.
+        if !self.lane_shown(&dialog.card.lane) {
             return Err(stale());
         }
         if self.kanban.prepared != Some(self.kanban.revision) {
@@ -345,6 +353,16 @@ impl OrchestratorView {
     ) {
         self.move_ticket_clicked(window, cx);
     }
+    /// Whether the open move dialog shows its confirming button enabled:
+    /// the plan is prepared, its capability held, and the board current.
+    pub(in crate::orchestrator::view) fn move_confirmable(&self) -> bool {
+        self.kanban.move_dialog.as_ref().is_some_and(|dialog| {
+            dialog.motion.is_open()
+                && dialog.ticket.is_some()
+                && self.kanban.prepared == Some(self.kanban.revision)
+                && matches!(dialog.phase, MovePhase::AwaitingConfirmation(_))
+        })
+    }
     #[cfg(test)]
     pub(in crate::orchestrator::view) fn close_move_dialog_for_test(
         &mut self,
@@ -399,6 +417,29 @@ impl OrchestratorView {
         }
     }
 
+    /// Withdraws a move not yet confirmed whose lane the selection now
+    /// hides. A submitted move holds no ticket and is left to finish.
+    pub(super) fn retire_hidden_move(&mut self) {
+        let Some(dialog) = &mut self.kanban.move_dialog else {
+            return;
+        };
+        if dialog.ticket.is_none() || self.repo_select.shows(Some(&dialog.card.lane.canonical())) {
+            return;
+        }
+        dialog.ticket = None;
+        if let Some(service) = self
+            .repos
+            .iter()
+            .find(|repo| repo.key == dialog.worker)
+            .and_then(|repo| repo.service.as_ref())
+        {
+            service.moves().cancel(&dialog.card);
+        }
+        dialog.motion.set(false, motion::now(), false);
+        let handles = [dialog.focus.clone(), dialog.confirm_focus.clone()];
+        self.retire_focus(handles);
+    }
+
     fn close_move_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(dialog) = &mut self.kanban.move_dialog {
             dialog.ticket = None;
@@ -431,10 +472,7 @@ impl OrchestratorView {
         if dialog.motion.moving(now) {
             window.request_animation_frame();
         }
-        let can_confirm = dialog.motion.is_open()
-            && dialog.ticket.is_some()
-            && self.kanban.prepared == Some(self.kanban.revision)
-            && matches!(dialog.phase, MovePhase::AwaitingConfirmation(_));
+        let can_confirm = self.move_confirmable();
         let theme = &self.look.theme;
         let mut body = div()
             .id("kanban-move-body")

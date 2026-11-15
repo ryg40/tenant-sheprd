@@ -4,6 +4,7 @@
 //! it was started under.
 
 mod appear;
+mod artifacts;
 pub(crate) mod azure;
 mod browser_data;
 mod checkpoints;

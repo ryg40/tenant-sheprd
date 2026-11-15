@@ -16,6 +16,8 @@ pub enum Error {
     OrderLimit,
     #[error("board preparation is pending")]
     Pending,
+    #[error("order of implementation exceeds its item limit")]
+    RankLimit,
     #[error("board record exceeds the response limit")]
     TooLarge,
     #[error("card is unknown or no longer belongs to this board")]
@@ -34,6 +36,7 @@ impl Error {
             Self::Busy => fl!("kanban-order-busy"),
             Self::OrderLimit => fl!("kanban-order-limit"),
             Self::Pending => fl!("kanban-pending"),
+            Self::RankLimit => fl!("kanban-rank-limit"),
             Self::UnknownCard => fl!("kanban-move-unknown"),
             Self::UnknownLane => fl!("kanban-order-unknown"),
             Self::Unsupported => fl!("kanban-move-unavailable"),

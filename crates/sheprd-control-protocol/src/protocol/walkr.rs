@@ -48,6 +48,9 @@ pub enum WalkrOp {
     },
     /// The caller's pane no longer holds the run. The page stays.
     Disconnect {},
+    /// Every session that waits for a pick leaves the count of the window,
+    /// in the app only: no host and no session file changes.
+    Clear {},
 }
 
 /// The page address of a Walkr run. Its path holds the secret of the server
@@ -135,6 +138,11 @@ pub struct HostSessions {
     pub count: u32,
     /// The sessions whose status is `open`: they wait for a pick.
     pub waiting: u32,
+    /// A Walkr server of the host's record answers `/health` with the
+    /// record's pid and protocol. Only SSH hosts are checked; `local` is
+    /// always `false`. It is not a waiting page.
+    #[serde(default)]
+    pub live_server: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -146,6 +154,10 @@ pub enum Reply {
         address: String,
         /// Whether a run of another server was replaced.
         replaced: bool,
+    },
+    Cleared {
+        /// The sessions that left the count.
+        count: u32,
     },
 }
 

@@ -164,6 +164,15 @@ impl OrchestratorView {
         let mut azure: Organizations = Vec::new();
         let mut seen: HashSet<&str> = HashSet::new();
         for repo in &self.repos {
+            // A hidden repository gives no entry; the catalog browses on.
+            let own = super::repo_select::checkout_identity(repo);
+            let shown = |source: &SourceKey| {
+                let key = match repo.remote {
+                    Some(_) => Some(super::repo_select::identity(source)),
+                    None => own.clone(),
+                };
+                self.repo_select.shows(key.as_deref())
+            };
             let remote = repo
                 .snapshot
                 .repo
@@ -174,7 +183,10 @@ impl OrchestratorView {
                 .into_iter()
                 .chain(repo.snapshot.items.iter().map(|item| &item.key.source));
             for source in sources {
-                if source.provider != Provider::Azure || !seen.insert(&source.repository) {
+                if source.provider != Provider::Azure
+                    || !shown(source)
+                    || !seen.insert(&source.repository)
+                {
                     continue;
                 }
                 let mut parts = source.repository.splitn(3, '/');
@@ -187,7 +199,9 @@ impl OrchestratorView {
                     add(&mut azure, &catalog.organization, &project.name, None);
                 }
             }
-            if let Some(RemoteScope::Repository(source)) = &repo.remote {
+            if let Some(RemoteScope::Repository(source)) = &repo.remote
+                && shown(source)
+            {
                 let mut parts = source.repository.splitn(3, '/');
                 if let (Some(organization), Some(project), Some(name)) =
                     (parts.next(), parts.next(), parts.next())
@@ -231,6 +245,10 @@ impl OrchestratorView {
             .flat_map(|repo| repo.snapshot.items.iter().map(|item| &item.key.source))
             .filter(|source| seen.insert(*source))
             .filter(|source| !held.contains(&super::account::held(source)))
+            .filter(|source| {
+                self.repo_select
+                    .shows(Some(&super::repo_select::identity(source)))
+            })
             .collect();
         found.sort_by_cached_key(|source| source.repository.to_lowercase());
         found

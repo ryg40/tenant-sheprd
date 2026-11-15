@@ -19,7 +19,7 @@ fn an_answer_finished_after_its_deadline_is_not_shown() {
         Answer::Detail {
             generation: 0,
             finished,
-            result: Ok(Box::new(detail)),
+            result: Ok(std::sync::Arc::new(detail)),
         },
         finished,
     );

@@ -359,6 +359,9 @@ impl SheprdWindow {
             "enter" if self.menu.page == Some(Page::OpenLink) => {
                 self.confirm_open_link(window, cx);
             }
+            "enter" if self.menu.page == Some(Page::Artifacts) => {
+                self.confirm_artifacts(window, cx);
+            }
             "enter" if self.menu.page == Some(Page::PortSignal) => {
                 self.confirm_port_signal(window, cx);
             }

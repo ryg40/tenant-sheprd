@@ -247,6 +247,7 @@ impl SheprdWindow {
             options: ConnectOptions::default(),
             orchestrator_events: Vec::new(),
             orchestrator_live: Default::default(),
+            orchestrator_repos: Default::default(),
             orchestrator_sampling: false,
             orchestrators: Default::default(),
             overview: Default::default(),

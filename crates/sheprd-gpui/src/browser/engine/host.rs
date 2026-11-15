@@ -367,6 +367,11 @@ impl WebViewDelegate for Delegate {
                 respond(load, Answer::empty());
             }
             Verdict::Serve { folder } => {
+                if let Some(document) = &self.0.open.document {
+                    let answer = document.answer(url.path(), !folder);
+                    respond(load, answer);
+                    return;
+                }
                 let root = self.0.open.root.as_deref().filter(|_| folder);
                 let path = url.path().to_owned();
                 self.0.preview.handle(root, &path, self.0.asked.wait(load));

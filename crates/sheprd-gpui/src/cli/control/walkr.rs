@@ -23,6 +23,8 @@ pub enum WalkrCommand {
         show: bool,
     },
     Disconnect,
+    /// Every waiting session leaves the count, in the app only.
+    Clear,
 }
 
 /// Any argument of a Walkr command may be a misplaced address, so no error
@@ -31,7 +33,7 @@ pub enum WalkrCommand {
 pub(super) fn command(args: &mut Args) -> Result<WalkrCommand, CliError> {
     let verb = args.verb().ok_or(CliError::MissingArgument {
         command: "walkr",
-        what: "status|connect|disconnect",
+        what: "status|connect|disconnect|clear",
     })?;
     let command = match verb.to_str() {
         Some("status") => WalkrCommand::Status,
@@ -52,6 +54,7 @@ pub(super) fn command(args: &mut Args) -> Result<WalkrCommand, CliError> {
             }
         }
         Some("disconnect") => WalkrCommand::Disconnect,
+        Some("clear") => WalkrCommand::Clear,
         Some(word) if is_word(word) => return Err(unknown("walkr", verb)),
         _ => return Err(CliError::UnexpectedUnnamed("walkr")),
     };

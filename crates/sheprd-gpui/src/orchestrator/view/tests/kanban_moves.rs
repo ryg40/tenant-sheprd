@@ -15,6 +15,9 @@ use std::sync::{Arc, Mutex};
 pub(in crate::orchestrator::view) struct Peer {
     pub fresh: Arc<Mutex<Option<Fresh>>>,
     pub outcome: Arc<Mutex<Option<Failure>>>,
+    /// Told when the worker prepared a move; it disconnects once no
+    /// worker holds a copy of the peer.
+    pub signal: Option<std::sync::mpsc::Sender<()>>,
     pub writes: Arc<Mutex<Vec<Mutation>>>,
 }
 
@@ -26,6 +29,12 @@ pub(in crate::orchestrator::view) enum Failure {
 }
 
 impl Peer {
+    /// Tells the test that the worker read the move it prepares.
+    pub fn prepared(&self) {
+        if let Some(signal) = &self.signal {
+            let _ = signal.send(());
+        }
+    }
     pub fn read(&self) -> sheprd_orchestrator::Result<Fresh> {
         if matches!(*self.outcome.lock().unwrap(), Some(Failure::Unknown))
             && !self.writes.lock().unwrap().is_empty()

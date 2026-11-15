@@ -114,7 +114,18 @@ fn connect_and_disconnect_round_trip_and_refuse_unknown_fields() -> serde_json::
     let op: WalkrOp = serde_json::from_value(disconnect.clone())?;
     assert_eq!(op, WalkrOp::Disconnect {});
     assert_eq!(serde_json::to_value(&op)?, disconnect);
+    let clear = serde_json::json!({ "op": "clear" });
+    let op: WalkrOp = serde_json::from_value(clear.clone())?;
+    assert_eq!(op, WalkrOp::Clear {});
+    assert_eq!(serde_json::to_value(&op)?, clear);
+    let reply = serde_json::json!({ "kind": "cleared", "count": 3 });
+    assert_eq!(
+        serde_json::from_value::<Reply>(reply.clone())?,
+        Reply::Cleared { count: 3 }
+    );
+    assert_eq!(serde_json::to_value(Reply::Cleared { count: 3 })?, reply);
     for invalid in [
+        serde_json::json!({ "op": "clear", "host": "local" }),
         serde_json::json!({ "op": "disconnect", "close": true }),
         serde_json::json!({ "op": "connect", "address": ADDRESS }),
         serde_json::json!({ "op": "connect", "address": ADDRESS, "show": true, "x": 1 }),

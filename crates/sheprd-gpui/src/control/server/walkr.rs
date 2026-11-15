@@ -89,6 +89,26 @@ pub(super) fn disconnect(caller: &Caller, cx: &mut App) -> Response {
         .unwrap_or_else(|_| Response::error(ErrorCode::NoWindow, "The window closed"))
 }
 
+/// Every waiting session of the window leaves its count, as **Clear** in
+/// the section does. Only the sessions of hosts that answered are known.
+pub(super) fn clear(caller: &Caller, cx: &mut App) -> Response {
+    let handle = match window_for(caller, cx) {
+        Ok(handle) => handle,
+        Err(response) => return response,
+    };
+    handle
+        .update(cx, |view, _, cx| {
+            let count = view.clear_walkr_waiting();
+            cx.notify();
+            Response::Walkr {
+                reply: Reply::Cleared {
+                    count: u32::try_from(count).unwrap_or(u32::MAX),
+                },
+            }
+        })
+        .unwrap_or_else(|_| Response::error(ErrorCode::NoWindow, "The window closed"))
+}
+
 /// Where the section's address comes from, whether a pane holds the run,
 /// and the host and port. `None` with no run and no `walkr.url`. A run has
 /// priority over the setting.
@@ -135,6 +155,7 @@ fn sessions(walkr: &mut Walkr, now: Instant, asked: &mut Asked) -> Option<Vec<Ho
         host: "local".into(),
         count: number(walkr.sessions.rows().len()),
         waiting: number(local.map_or(0, |tally| tally.waiting)),
+        live_server: false,
     }];
     hosts.extend(walkr.waiting.hosts().iter().filter_map(|host| {
         let crate::automations::Machine::Ssh(target) = &host.machine else {
@@ -145,6 +166,7 @@ fn sessions(walkr: &mut Walkr, now: Instant, asked: &mut Asked) -> Option<Vec<Ho
             host: target.clone(),
             count: number(tally.sessions.min(crate::walkr::history::pending::KEPT)),
             waiting: number(tally.waiting),
+            live_server: tally.live,
         })
     }));
     Some(hosts)
@@ -226,6 +248,7 @@ pub(super) fn serve(
             return incoming.respond(connect(&call.caller, address, *show, cx));
         }
         WalkrOp::Disconnect {} => return incoming.respond(disconnect(&call.caller, cx)),
+        WalkrOp::Clear {} => return incoming.respond(clear(&call.caller, cx)),
     }
     let handle = match window_for(&call.caller, cx) {
         Ok(handle) => handle,

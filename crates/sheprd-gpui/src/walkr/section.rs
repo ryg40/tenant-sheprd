@@ -245,6 +245,15 @@ impl SheprdWindow {
             }
         };
         let body = self.render_walkr_history(body, cx);
+        // The session's page has no control of its own: more ratings are
+        // asked for here, and come in a new document.
+        #[cfg(embedded_pages)]
+        let earlier = self
+            .shows_walkr_session_page()
+            .then(|| self.walkr_earlier_ratings(cx))
+            .flatten();
+        #[cfg(not(embedded_pages))]
+        let earlier: Option<Stateful<Div>> = None;
         // From a saved session back to the page of the run, while there is one.
         let back = self
             .walkr
@@ -316,6 +325,7 @@ impl SheprdWindow {
                         )
                     })
                     .child(div().flex_1())
+                    .children(earlier)
                     .children(back)
                     .when(!idle, |header| header.child(refresh))
                     .map(|header| {

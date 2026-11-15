@@ -136,6 +136,10 @@ mod walkr_page;
 #[cfg(embedded_pages)]
 mod walkr_run;
 
+/// The page of a saved Walkr session, and the text view after a failure.
+#[cfg(servo_pages)]
+mod walkr_session;
+
 /// The font size keys zoom a browser tab's page. Only builds that show
 /// pages open a browser tab.
 #[cfg(embedded_pages)]

@@ -104,12 +104,38 @@ fn kanban_unknown_cross_window_and_cancelled_drags_preserve_order_and_tracker(
                 view.order_lane(&one, None, cx),
                 Err(Error::Pending)
             ));
-            assert_eq!(view.kanban.order, vec![two, one]);
+            assert_eq!(view.kanban.order, vec![two.clone(), one.clone()]);
             assert_eq!(*view.repo_mut().snapshot.items, before);
             assert!(matches!(
                 worker.try_recv(),
                 Err(std::sync::mpsc::TryRecvError::Empty)
             ));
+        })
+    });
+    // A hidden lane keeps its saved place but is neither moved nor a place
+    // to move before, also once the board without it settles.
+    cx.run_until_parked();
+    cx.update(|_, cx| {
+        view.update(cx, |view, cx| {
+            let selection = crate::orchestrator::view::repo_select::Selection {
+                active: vec![two.canonical()],
+                hidden: vec![one.canonical()],
+            };
+            view.set_repo_selection(Some(&selection), false, cx);
+        })
+    });
+    cx.run_until_parked();
+    cx.update(|_, cx| {
+        view.update(cx, |view, cx| {
+            assert!(matches!(
+                view.order_lane(&one, None, cx),
+                Err(Error::UnknownLane)
+            ));
+            assert!(matches!(
+                view.order_lane(&two, Some(&one), cx),
+                Err(Error::UnknownLane)
+            ));
+            assert_eq!(view.kanban.order, vec![two.clone(), one.clone()]);
         })
     });
 }

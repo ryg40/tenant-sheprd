@@ -5,6 +5,14 @@ use serde::{Deserialize, Serialize};
 pub const MAX_PAGE_BYTES: usize = 192 * 1024;
 pub const MAX_PAGE_CARDS: usize = 100;
 pub const MAX_CURSOR_BYTES: usize = 80;
+/// The most repository keys a selection or a `repos set` request holds.
+pub const MAX_REPO_KEYS: usize = 512;
+/// The longest repository key, in UTF-8 bytes.
+pub const MAX_REPO_KEY_BYTES: usize = 1024;
+/// The most key bytes one `repos set` request carries, under the transport's ceiling.
+pub const MAX_REPO_REQUEST_BYTES: usize = 192 * 1024;
+/// Items one `board rank` names: a lane ranks at most this many.
+pub const MAX_RANK_ITEMS: usize = 100;
 
 /// Fixed display order, independent of tracker and agent states.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -36,6 +44,46 @@ pub enum OrchestratorOp {
         lane: String,
         to: BoardColumn,
     },
+    /// Replaces a lane's local order of implementation; no tracker write.
+    BoardRank {
+        lane: String,
+        items: Vec<String>,
+    },
+    /// The listed repositories, and which the sections show.
+    Repos,
+    /// Shows only `keys`, or every repository (listed later too) for `None`.
+    ReposSet {
+        keys: Option<Vec<String>>,
+    },
+}
+
+/// Whether `keys` fits a `repos set` request.
+pub fn repo_keys_bounded(keys: &[String]) -> bool {
+    keys.len() <= MAX_REPO_KEYS
+        && keys
+            .iter()
+            .all(|key| !key.is_empty() && key.len() <= MAX_REPO_KEY_BYTES)
+        && keys.iter().map(String::len).sum::<usize>() <= MAX_REPO_REQUEST_BYTES
+}
+
+/// One repository the orchestrator lists.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Repo {
+    pub key: String,
+    pub name: String,
+    pub host: String,
+    pub active: bool,
+    /// Listed since the selection was saved, and not picked.
+    pub new: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Repos {
+    /// Whether a selection is saved; without one every repository is active.
+    pub selected: bool,
+    pub repos: Vec<Repo>,
+    /// More repositories are listed than one response carries.
+    pub truncated: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -102,6 +150,10 @@ pub struct Card {
     /// A proposal can prepare native confirmation; this never proves permission.
     pub can_move: bool,
     pub read_only_reason: String,
+    /// The card's place in its lane's order of implementation, counted from
+    /// 1 over the lane's ranked cards that are not in Done.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rank: Option<usize>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -110,6 +162,7 @@ pub enum BoardReply {
     Pending,
     RestartRequired,
     Page(Box<BoardPage>),
+    Repos(Repos),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

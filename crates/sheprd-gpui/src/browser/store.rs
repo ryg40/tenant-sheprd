@@ -28,6 +28,11 @@ impl TabId {
     #[cfg(any(embedded_pages, test))]
     pub(crate) const WALKR: Self = Self::panel(0);
 
+    /// The Walkr section's page of a saved session. Chats count their pages
+    /// up from the panel range's top, so this one, far below, meets none.
+    #[cfg(embedded_pages)]
+    pub(crate) const WALKR_SESSION: Self = Self::panel(u64::MAX / 4);
+
     /// The `n`th page a chat shows in a message. Store tabs count up from
     /// one, so these count down from the top and the two never meet.
     #[cfg(any(embedded_pages, test))]

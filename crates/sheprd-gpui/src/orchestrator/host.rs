@@ -402,6 +402,12 @@ impl SheprdWindow {
             view.update(cx, |view, cx| {
                 view.set_lane_order(&self.kanban_order.keys, authoritative, cx);
                 view.lane_order_failed(self.kanban_order.failed.get(), cx);
+                view.set_repo_selection(
+                    self.orchestrator_repos.selection.as_ref(),
+                    self.orchestrator_repos.failed.get(),
+                    cx,
+                );
+                view.restore_retired_focus(window, cx);
                 view.set_repos(specs.clone(), cx);
                 view.set_visible(shown_view == Some(id));
                 view.poll(cx);
@@ -414,6 +420,7 @@ impl SheprdWindow {
                 }
             });
             self.collect_lane_order(&view, cx);
+            self.collect_repo_selection(&view, cx);
         }
     }
 
@@ -448,6 +455,20 @@ impl SheprdWindow {
             self.kanban_order.keys = keys;
             self.kanban_order.modified |= chosen;
             self.kanban_order.unsaved.set(true);
+            self.save_chrome();
+        }
+    }
+
+    /// Takes a selection the view changed into the window's chrome and saves it.
+    pub(crate) fn collect_repo_selection(
+        &mut self,
+        view: &Entity<OrchestratorView>,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(selection) = view.update(cx, |view, _| view.take_repo_selection()) {
+            self.orchestrator_repos.selection = selection;
+            self.orchestrator_repos.modified = true;
+            self.orchestrator_repos.unsaved.set(true);
             self.save_chrome();
         }
     }

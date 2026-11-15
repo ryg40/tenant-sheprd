@@ -184,6 +184,8 @@ pub struct Config {
     pub agent_skill: AgentSkillConfig,
     /// Where the sidebar lists agents while `show_agents` is on.
     pub agents_placement: AgentsPlacement,
+    /// The artifact server page that the activity bar's Artifacts button opens.
+    pub(crate) artifacts: crate::artifacts::Config,
     /// What shows behind the main window's terminals and chrome.
     pub azure: AzureConfig,
     /// Where Azure DevOps tokens pasted in the account menu are saved.
@@ -387,6 +389,7 @@ impl Default for Config {
             agent_roles: Vec::new(),
             agent_skill: AgentSkillConfig::default(),
             agents_placement: AgentsPlacement::default(),
+            artifacts: crate::artifacts::Config::default(),
             azure: AzureConfig::default(),
             azure_devops: AzureDevOpsConfig::default(),
             backdrop: Backdrop::default(),
@@ -484,6 +487,7 @@ struct Settings {
     agent_roles: Vec<sheprd_orchestrator::role::Role>,
     agent_skill: AgentSkillConfig,
     agents_placement: AgentsPlacement,
+    artifacts: crate::artifacts::Config,
     azure: AzureConfig,
     azure_devops: AzureDevOpsConfig,
     backdrop: Backdrop,
@@ -949,6 +953,7 @@ impl Config {
         config.contrast = settings.contrast;
         config.agents_placement = settings.agents_placement;
         config.agent_skill = settings.agent_skill;
+        config.artifacts = settings.artifacts;
         config.usage = settings.usage;
         config.option_as_alt = settings.option_as_alt;
         config.open_links_in = settings.open_links_in;

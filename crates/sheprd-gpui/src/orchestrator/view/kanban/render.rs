@@ -1,12 +1,13 @@
 //! C1 repository matrix: one virtual vertical list and one horizontal offset.
 use super::*;
-use crate::config::corners;
 use rows::Line;
 use sheprd_control_protocol::BoardColumn;
 
 pub(super) const REPOSITORY_WIDTH: f32 = 188.;
 pub(super) const COLUMN_WIDTH: f32 = 240.;
 const ROW_HEIGHT: f32 = 30.;
+/// One line of lane facts: small text with room at every text size.
+const FACT_HEIGHT: f32 = 18.;
 const BOARD_WIDTH: f32 = REPOSITORY_WIDTH + COLUMN_WIDTH * 4.;
 
 impl OrchestratorView {
@@ -140,6 +141,7 @@ impl OrchestratorView {
                 el.child(div().px_4().pb_2().child(fl!("kanban-partial")))
             })
             .child(div().px_4().pb_2().child(fl!("kanban-order-help")))
+            .child(div().px_4().pb_2().child(fl!("kanban-rank-help")))
             .child(div().px_4().pb_2().child(fl!("kanban-move-help")))
             .when(self.kanban.save_failed, |el| {
                 el.child(div().px_4().pb_2().child(fl!("kanban-order-unsaved")))
@@ -182,8 +184,9 @@ impl OrchestratorView {
             return div().into_any_element();
         };
         let theme = &self.look.theme;
+        // One uniform line height keeps the virtual list exact for 2,000 cards.
         let mut row = div()
-            .h(px(self.look.row(ROW_HEIGHT)))
+            .h(px(self.look.row(card::LINE_HEIGHT)))
             .flex()
             .w_full()
             .overflow_hidden();
@@ -195,10 +198,10 @@ impl OrchestratorView {
                 let hint = lane.hint.clone();
                 let foreground = theme.foreground;
                 let surface = theme.surface;
-                row = row
-                    .border_t_1()
-                    .border_color(rgb(theme.active))
-                    .bg(rgb(theme.surface))
+                let info = self.lane_facts([&lane.host, &lane.status]);
+                let heading = div()
+                    .h(px(self.look.row(ROW_HEIGHT)))
+                    .flex()
                     .child(self.lane_handle(lane, cx))
                     .child(
                         div()
@@ -250,45 +253,77 @@ impl OrchestratorView {
                                 cx.notify();
                             })),
                     );
-                for count in &lane.counts {
+                row = row
+                    .border_t_1()
+                    .border_color(rgb(theme.active))
+                    .bg(rgb(theme.surface))
+                    .child(
+                        div()
+                            .w(px(REPOSITORY_WIDTH))
+                            .flex_none()
+                            .h_full()
+                            .flex()
+                            .flex_col()
+                            .overflow_hidden()
+                            .child(heading)
+                            .child(info),
+                    );
+                for (count, column) in lane.counts.iter().zip(BoardColumn::ALL) {
                     row = row.child(
                         div()
                             .w(px(COLUMN_WIDTH))
                             .flex_none()
                             .h_full()
                             .px_3()
+                            .pt_1()
                             .flex()
-                            .items_center()
+                            .flex_col()
                             .border_l_1()
                             .border_color(rgb(theme.active))
                             .text_color(rgb(theme.subtext()))
-                            .child(count.clone()),
+                            .child(
+                                div()
+                                    .h(px(self.look.row(ROW_HEIGHT - 4.)))
+                                    .flex()
+                                    .items_center()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child(rows::column(*column)),
+                            )
+                            .child(div().text_size(self.look.small()).child(count.clone())),
                     );
                 }
                 return self.lane_target(row, Some(lane.key.clone()), index, cx);
             }
-            Line::Cards { lane, row: at } => {
+            Line::Facts(lane) => {
                 let lane = &ready.lanes[lane];
-                let context = match at {
-                    0 => lane.host.clone(),
-                    1 => lane.status.clone(),
-                    2 => lane.history.clone(),
-                    3 => lane.mapping.clone(),
-                    4 => lane.evidence.clone(),
-                    _ => SharedString::default(),
-                };
                 row = row.child(
                     div()
                         .w(px(REPOSITORY_WIDTH))
                         .flex_none()
                         .h_full()
-                        .px_3()
-                        .flex()
-                        .items_center()
                         .bg(rgb(theme.surface))
-                        .text_size(self.look.small())
-                        .text_color(rgb(theme.subtext()))
-                        .child(div().min_w_0().truncate().child(context)),
+                        .pt_1()
+                        .child(self.lane_facts([&lane.history, &lane.mapping, &lane.evidence])),
+                );
+                for _ in BoardColumn::ALL {
+                    row = row.child(
+                        div()
+                            .w(px(COLUMN_WIDTH))
+                            .flex_none()
+                            .h_full()
+                            .border_l_1()
+                            .border_color(rgb(theme.active)),
+                    );
+                }
+            }
+            Line::Cards { lane, row: at } => {
+                let lane = &ready.lanes[lane];
+                row = row.child(
+                    div()
+                        .w(px(REPOSITORY_WIDTH))
+                        .flex_none()
+                        .h_full()
+                        .bg(rgb(theme.surface)),
                 );
                 for (column_index, cell) in lane.cells.iter().enumerate() {
                     let mut column = div()
@@ -297,57 +332,10 @@ impl OrchestratorView {
                         .h_full()
                         .border_l_1()
                         .border_color(rgb(theme.active))
-                        .px_1();
+                        .px_2()
+                        .pt(px(4.));
                     if let Some(card_index) = cell.get(at) {
-                        let card = &ready.cards[*card_index];
-                        let key = card.summary.key.clone();
-                        let selected = self.kanban.selected.as_ref() == Some(&card.domain.key);
-                        let hover = theme.active;
-                        column = column.child(
-                            div()
-                                .id(card.element_id.clone())
-                                .role(Role::Button)
-                                .aria_label(card.name.clone())
-                                .h_full()
-                                .flex()
-                                .items_center()
-                                .gap_1()
-                                .px_1()
-                                .rounded(px(corners::SMALL))
-                                .cursor_pointer()
-                                .hover(move |style| style.bg(rgb(hover)))
-                                .when(selected, |el| {
-                                    el.bg(rgb(theme.primary_wash()))
-                                        .border_1()
-                                        .border_color(rgb(theme.primary()))
-                                })
-                                .child(self.card_handle(card, cx))
-                                .child(
-                                    div()
-                                        .flex_none()
-                                        .text_color(rgb(theme.subtext()))
-                                        .child(card.summary.identifier.clone()),
-                                )
-                                .child(
-                                    div()
-                                        .flex_1()
-                                        .min_w_0()
-                                        .truncate()
-                                        .child(card.summary.title.clone()),
-                                )
-                                .child(
-                                    div()
-                                        .max_w(px(78.))
-                                        .truncate()
-                                        .text_size(self.look.small())
-                                        .text_color(rgb(theme.subtext()))
-                                        .child(card.suffix.clone()),
-                                )
-                                .on_click(cx.listener(move |this, _, window, cx| {
-                                    this.open_kanban_key(&key, cx);
-                                    this.focus_kanban_popup(window, cx);
-                                })),
-                        );
+                        column = column.child(self.render_card(&ready.cards[*card_index], cx));
                     } else if at == 0 {
                         column = column.child(
                             div()
@@ -360,15 +348,43 @@ impl OrchestratorView {
                         lane.key.clone(),
                         BoardColumn::ALL[column_index],
                         at,
+                        cell.len(),
                         cx,
                     ));
                 }
             }
         }
         let before = match *line {
-            Line::Cards { lane, .. } => ready.lanes.get(lane + 1).map(|lane| lane.key.clone()),
+            Line::Facts(lane) | Line::Cards { lane, .. } => {
+                ready.lanes.get(lane + 1).map(|lane| lane.key.clone())
+            }
             Line::Header(_) => None,
         };
         self.lane_target(row, before, index, cx)
+    }
+
+    /// Lane facts, one per line. Each line has its own scaled height, so the
+    /// lines fit their uniform virtual line at every text size.
+    fn lane_facts<'a>(&self, facts: impl IntoIterator<Item = &'a SharedString>) -> Div {
+        div()
+            .px_3()
+            .flex()
+            .flex_col()
+            .text_size(self.look.small())
+            .line_height(px(self.look.row(FACT_HEIGHT)))
+            .text_color(rgb(self.look.theme.subtext()))
+            .children(
+                facts
+                    .into_iter()
+                    .filter(|text| !text.is_empty())
+                    .map(|text| {
+                        div()
+                            .h(px(self.look.row(FACT_HEIGHT)))
+                            .flex_none()
+                            .min_w_0()
+                            .truncate()
+                            .child(text.clone())
+                    }),
+            )
     }
 }

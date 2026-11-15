@@ -27,7 +27,8 @@ const GRACE: Duration = Duration::from_secs(1);
 #[derive(Debug)]
 pub(crate) enum Shown {
     Loading,
-    Detail(Box<history::Detail>),
+    /// Shared, so a page of it clones the handle, not the record.
+    Detail(std::sync::Arc<history::Detail>),
     Failed(history::Error),
 }
 
@@ -276,6 +277,16 @@ impl Sessions {
         self.rows = rows;
         self.listed_at = Some(Instant::now());
         self.list_wanted = false;
+    }
+
+    /// Row `detail.id` is picked and read, as the worker's answer would.
+    #[cfg(test)]
+    pub(crate) fn test_detail(&mut self, detail: history::Detail) {
+        self.pick = Some(detail.id.clone());
+        self.detail = Some((
+            detail.id.clone(),
+            Shown::Detail(std::sync::Arc::new(detail)),
+        ));
     }
 
     /// The listed rows, newest first.

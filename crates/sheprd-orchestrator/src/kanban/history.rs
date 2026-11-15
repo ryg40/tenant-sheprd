@@ -236,7 +236,8 @@ pub(crate) fn bound_settled(records: &mut Vec<Record>, cutoff: DateTime<Utc>) ->
     truncated
 }
 
-pub(crate) fn settled(item: &Item) -> bool {
+/// A closed issue or a merged or closed pull request: a Done card.
+pub fn settled(item: &Item) -> bool {
     matches!(
         item.key.source.provider,
         Provider::Github | Provider::Forgejo

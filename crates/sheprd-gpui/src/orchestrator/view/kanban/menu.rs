@@ -11,6 +11,16 @@ pub(super) struct Menu {
     pub(super) revision: u64,
 }
 
+impl Menu {
+    pub(super) fn close(&mut self) {
+        self.motion.set(false, motion::now(), false);
+    }
+
+    pub(super) fn motion_open(&self) -> bool {
+        self.motion.is_open()
+    }
+}
+
 impl State {
     pub(super) fn move_menu_open(&self) -> bool {
         self.move_menu

@@ -31,3 +31,13 @@ settings-sidebar-host-tint = Tints the host header, its workspaces, worktrees an
 settings-sidebar-host-uncoloured = Connected, no colour set.
 settings-sidebar-host-offline = Not connected.
 # The hex field of a host with no colour.
+
+## Artifacts.
+
+# The artifact server's page that the activity bar's Artifacts button opens.
+settings-sidebar-artifacts = Artifacts
+# $example is a sample address.
+settings-sidebar-artifacts-placeholder = None, or { $example }
+settings-sidebar-artifacts-note = The address of an artifact server's page, for the Artifacts button of the activity bar. The button also shows without an address when the `artifacts` program of the tenant-pi kit is installed (on PATH or in ~/.local/bin, Linux and macOS only). A click asks the program first and opens the page; Sheprd starts a stopped local server only after you say yes. This address wins when the program serves another one. A loopback address such as 127.0.0.1 is the computer where Sheprd runs.
+settings-sidebar-artifacts-invalid = Use an http or https address.
+settings-sidebar-artifacts-apply = Apply artifacts address

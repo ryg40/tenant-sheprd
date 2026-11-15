@@ -417,6 +417,7 @@ impl SettingsWindow {
                         cx,
                     )),
             )
+            .child(self.render_artifacts_controls(cx))
             .child(ui::section(
                 theme,
                 &fl!("settings-sidebar-section-spacing"),

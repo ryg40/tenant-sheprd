@@ -1,4 +1,6 @@
 //! On-demand Walkr connectivity. Only the worker performs network I/O.
+#[cfg(any(embedded_pages, test))]
+pub(crate) mod document;
 mod error;
 mod header;
 pub(crate) mod history;
@@ -79,6 +81,9 @@ pub(crate) struct Walkr {
     run: Option<Run>,
     /// Numbers the runs of this window.
     serial: u64,
+    /// The page of a saved session; see `browser::walkr_session`.
+    #[cfg(embedded_pages)]
+    pub(crate) session_page: crate::browser::SessionPage,
     /// The saved sessions the section lists.
     pub(crate) sessions: sessions::Sessions,
     shown: bool,
@@ -110,6 +115,8 @@ impl Default for Walkr {
             refresh: false,
             run: None,
             serial: 0,
+            #[cfg(embedded_pages)]
+            session_page: crate::browser::SessionPage::default(),
             sessions: sessions::Sessions::default(),
             shown: false,
             start_error: None,

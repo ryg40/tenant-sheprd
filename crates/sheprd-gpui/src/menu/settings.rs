@@ -195,6 +195,7 @@ impl SheprdWindow {
                             error: None,
                         });
                         crate::caffeine::set_scope(config.status_bar.keep_awake_scope, cx);
+                        crate::artifacts::find_program(cx);
                         crate::i18n::follow_config(&config.language, cx);
                         let menus_changed = crate::menus::changed(&this.config, &config);
                         if config.keybindings != this.config.keybindings {

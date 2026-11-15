@@ -27,7 +27,7 @@ pub(super) fn start(
     cx: &mut Context<SheprdWindow>,
 ) {
     cx.spawn_in(window, async move |this, cx| {
-        if id == TabId::WALKR {
+        if super::native::private_page(id) {
             // The version lookup can read the runtime installation. Keep it
             // off the UI thread, and refuse before the engine loads the URL.
             let private = cx

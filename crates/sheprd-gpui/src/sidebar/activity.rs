@@ -13,7 +13,9 @@
 //! whose count is the Compare sessions that wait for a pick on this computer
 //! and the SSH hosts the window shows, and whose click goes to the newest.
 //! `[sidebar] activity_bar = false` turns the bar off, and `[sidebar]
-//! automations = false` leaves Automations off it. With the bar on, the
+//! automations = false` leaves Automations off it. `[artifacts] url`, or the
+//! user's `artifacts` program, adds an Artifacts button under Walkr that
+//! opens the artifacts page (`crate::artifacts`). With the bar on, the
 //! sidebar toggle sits at the end of the Workspaces title, and collapsing the
 //! sidebar keeps the bar, with the compact rail and the toggle beside it.
 
@@ -450,9 +452,9 @@ impl SheprdWindow {
             .bg(self.fill().panel(theme.sidebar_background()))
             .border_e(px(1.))
             .border_color(rgb(theme.active));
-        // The sections, then any mod apps, scroll in a short window so
-        // Settings stays in reach under them. The top padding sits inside,
-        // leaving a count bubble room above the first icon.
+        // The sections, then Artifacts and any mod apps, scroll in a short
+        // window so Settings stays in reach under them. The top padding sits
+        // inside, leaving a count bubble room above the first icon.
         let mut tabs = div()
             .id("activity-tabs")
             .debug_selector(|| "activity-tabs".into())
@@ -505,6 +507,24 @@ impl SheprdWindow {
                 }));
             tabs = tabs.child(button);
         }
+        // A link, not a section, listed under Walkr and over the mod apps:
+        // it opens the artifacts page as a browser tab, asking first to
+        // start a stopped local server (`crate::artifacts`). It pulses while
+        // the program runs.
+        let artifacts = crate::artifacts::shown(&self.config.artifacts, cx).then(|| {
+            self.bar_button(
+                "activity-artifacts",
+                "icons/scroll.svg",
+                fl!("sidebar-activity-artifacts").into(),
+                (BarState::Idle, crate::artifacts::busy(cx)),
+                None,
+            )
+            .role(Role::Button)
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.click_artifacts(window, cx);
+            }))
+        });
+        let tabs = tabs.children(artifacts);
         bar.child(tabs.children(self.mod_activity_buttons(cx)))
             .child(
                 self.bar_button(

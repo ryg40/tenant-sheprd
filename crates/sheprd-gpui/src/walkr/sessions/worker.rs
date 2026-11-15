@@ -33,7 +33,7 @@ pub(super) enum Answer {
     Detail {
         generation: u64,
         finished: Instant,
-        result: Result<Box<history::Detail>, history::Error>,
+        result: Result<Arc<history::Detail>, history::Error>,
     },
 }
 
@@ -147,7 +147,7 @@ fn run(
             let answer = match (list, detail) {
                 (_, Some((generation, id, ratings, deadline))) => {
                     let result = match &home {
-                        Some(home) => history::detail(home, &id, ratings, deadline).map(Box::new),
+                        Some(home) => history::detail(home, &id, ratings, deadline).map(Arc::new),
                         None => Err(history::Error::NoHome),
                     };
                     Answer::Detail {

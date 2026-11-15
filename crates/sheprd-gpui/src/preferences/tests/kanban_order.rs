@@ -15,6 +15,10 @@ fn kanban_save_reload_and_authoritative_removal_preserve_survivors_and_chrome(
     let mut chrome = Chrome {
         device_order: vec!["test-device".into()],
         kanban_lane_order: order::moved(&roster, &roster, &two, Some(&one)).unwrap(),
+        kanban_ranks: crate::orchestrator::view::kanban::rank::Ranks::bounded([(
+            one.clone(),
+            vec!["7".into(), "3".into()],
+        )]),
         notes_width: Some(310.),
         sidebar_width: Some(270.),
         ..Default::default()
@@ -25,7 +29,9 @@ fn kanban_save_reload_and_authoritative_removal_preserve_survivors_and_chrome(
     let worker = preferences.worker.take().unwrap();
     drop(preferences);
     worker.join().unwrap();
-    assert_eq!(read_chrome(&path).unwrap(), chrome);
+    let reloaded = read_chrome(&path).unwrap();
+    assert_eq!(reloaded.kanban_ranks, chrome.kanban_ranks);
+    assert_eq!(reloaded, chrome);
     // Temporary disappearance, filters, and caps are not removal evidence.
     let temporary = order::reconcile(&chrome.kanban_lane_order, std::slice::from_ref(&one), false);
     assert_eq!(temporary, chrome.kanban_lane_order);
@@ -36,12 +42,18 @@ fn kanban_save_reload_and_authoritative_removal_preserve_survivors_and_chrome(
     assert_eq!(read_chrome(&path).unwrap(), expected);
     // A late load cannot replace an order already chosen this session.
     let mut stored = order::Stored {
-        keys: vec![two.clone(), one.clone()],
+        keys: order::Keys {
+            lanes: vec![two.clone(), one.clone()],
+            ..Default::default()
+        },
         modified: true,
         ..Default::default()
     };
-    stored.restore(vec![one.clone(), two.clone()]);
-    assert_eq!(stored.keys, vec![two.clone(), one.clone()]);
+    stored.restore(order::Keys {
+        lanes: vec![one.clone(), two.clone()],
+        ..Default::default()
+    });
+    assert_eq!(stored.keys.lanes, vec![two.clone(), one.clone()]);
 
     let (window, cx) = cx.add_window_view(crate::sidebar::layout_tests::fixture_window);
     // Chrome and Local are ready, but pending/failed discovery hides a remote lane.
@@ -56,8 +68,8 @@ fn kanban_save_reload_and_authoritative_removal_preserve_survivors_and_chrome(
             window.live.status = crate::state::ConnectionStatus::Connected;
             window.endpoints[0].connection.target = sheprd_client::ConnectTarget::Local;
             window.apply_stored_chrome(Ok(loaded));
-            window.kanban_order.keys = order::reconcile(
-                &window.kanban_order.keys,
+            window.kanban_order.keys.lanes = order::reconcile(
+                &window.kanban_order.keys.lanes,
                 std::slice::from_ref(&one),
                 window.kanban_roster_authoritative(1),
             );
@@ -83,14 +95,15 @@ fn kanban_save_reload_and_authoritative_removal_preserve_survivors_and_chrome(
             window.catalog = crate::endpoint::Catalog::new(&target);
             window.endpoints[0].connection.target = target.clone();
             window.apply_stored_chrome(Ok(loaded));
-            window.kanban_order.keys = order::reconcile(
-                &window.kanban_order.keys,
+            window.kanban_order.keys.lanes = order::reconcile(
+                &window.kanban_order.keys.lanes,
                 &roster,
                 window.kanban_roster_authoritative(0),
             );
             if !roster.is_empty() {
-                window.kanban_order.keys =
-                    order::moved(&window.kanban_order.keys, &roster, &two, Some(&one)).unwrap();
+                window.kanban_order.keys.lanes =
+                    order::moved(&window.kanban_order.keys.lanes, &roster, &two, Some(&one))
+                        .unwrap();
                 window.kanban_order.modified = true;
             }
             window.save_chrome();

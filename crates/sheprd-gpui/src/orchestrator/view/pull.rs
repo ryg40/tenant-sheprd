@@ -65,6 +65,9 @@ impl OrchestratorView {
     }
 
     pub(super) fn post_comment(&mut self, cx: &mut Context<Self>) {
+        if self.open_item_hidden() {
+            return;
+        }
         let text = self.comment.read(cx).text().trim().to_owned();
         let (Some(token), Some(pr)) = (self.pr_token(), self.open_pull_request()) else {
             return;
@@ -93,6 +96,9 @@ impl OrchestratorView {
         expected: &pr_actions::Target,
         cx: &mut Context<Self>,
     ) {
+        if self.open_item_hidden() {
+            return;
+        }
         if self.pr.target() != Some(expected) {
             self.notice = Some(crate::orchestrator::Notice {
                 outcome: Err(std::sync::Arc::new(

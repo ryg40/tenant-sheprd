@@ -2,12 +2,12 @@
 //! the dispatch dialog, the confirmations for stopping an agent, removing a
 //! worktree, or deleting a bead, and the banner with each action's outcome.
 
-use super::{OrchestratorView, look::agent_icon};
+use super::OrchestratorView;
 use crate::{
     config::{corners, mix},
     i18n::{Localize, fl},
     orchestrator::{
-        Action, DispatchRequest, Item, Notice, Provider, SourceKey,
+        Action, DispatchRequest, Item, Notice, SourceKey,
         actions::valid_model,
         prompt::{self, MAX_EXTRA},
         role::Role,
@@ -19,8 +19,12 @@ use crate::{
 use gpui::{prelude::*, *};
 use sheprd_orchestrator::actions::Done;
 
+mod dialog;
+mod launch;
 #[cfg(test)]
 mod tests;
+
+pub(crate) use launch::Last;
 
 /// The dispatch dialog's choices.
 pub(crate) struct Dialog {
@@ -39,9 +43,21 @@ pub(crate) struct Dialog {
     problem: Option<Problem>,
     /// A read-only review of a pull request rather than work on an issue.
     review: bool,
+    /// The folded rows: prompt profile, model, extra instructions, host.
+    more: launch::More,
 }
 
 impl Dialog {
+    /// The canonical key of the item it dispatches.
+    pub(super) fn item(&self) -> &str {
+        &self.item
+    }
+
+    /// The focus handles of its fields.
+    pub(super) fn focus_handles(&self, cx: &App) -> [FocusHandle; 3] {
+        [&self.branch, &self.extra, &self.model].map(|field| field.read(cx).focus.clone())
+    }
+
     /// Goes back to the agent's default role.
     pub(super) fn forget_role(&mut self) {
         self.role = None;
@@ -58,6 +74,49 @@ impl Dialog {
                 .is_some_and(|(role, kind)| role.fits(kind))
         };
         self.role = self.role.filter(|&index| fits(index));
+    }
+
+    /// Picks the role `index`, or the agent's default for `None`, unless
+    /// the chosen agent cannot take it. Says whether it took the choice.
+    fn choose_role(&mut self, index: Option<usize>, roles: &[Role]) -> bool {
+        let fits = index.is_none_or(|index| {
+            roles
+                .get(index)
+                .zip(self.kind)
+                .is_some_and(|(role, kind)| role.fits(kind))
+        });
+        if fits {
+            self.role = index;
+        }
+        fits
+    }
+
+    /// The chosen role, when it fits the chosen agent.
+    fn chosen_role<'a>(&self, roles: &'a [Role]) -> Option<&'a Role> {
+        let kind = self.kind?;
+        self.role
+            .and_then(|index| roles.get(index))
+            .filter(|role| role.fits(kind))
+    }
+
+    /// Moves focus from a folded field to the branch field, which always
+    /// shows: keys go to the focused element's ancestors, so focus on a
+    /// field that is not drawn would cut Enter and Escape off the dialog.
+    fn keep_focus_shown(&self, window: &mut Window, cx: &mut App) {
+        let folded = [&self.extra, &self.model]
+            .into_iter()
+            .any(|field| field.read(cx).focus.is_focused(window));
+        if folded {
+            window.focus(&self.branch.read(cx).focus.clone(), cx);
+        }
+    }
+
+    /// Records a problem; one in a folded row opens the fold to show it.
+    fn fail(&mut self, problem: Problem) {
+        if matches!(problem, Problem::Extra | Problem::Model) && !self.more.toggle.is_open() {
+            self.more.set(true);
+        }
+        self.problem = Some(problem);
     }
 }
 
@@ -88,13 +147,20 @@ impl Problem {
 /// A destructive action waiting for the user to confirm it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Confirm {
+    /// Stopping run `run` of item `item`, which repository `repo`'s
+    /// worker holds.
     Stop {
         run: String,
         agent: String,
+        item: String,
+        repo: String,
     },
+    /// Removing run `run`'s worktree, bound like [`Confirm::Stop`].
     Remove {
         run: String,
         branch: String,
+        item: String,
+        repo: String,
     },
     DeleteBead {
         source: SourceKey,
@@ -226,7 +292,16 @@ impl OrchestratorView {
             && let Some(installed) = &snapshot.installed
             && !dialog.kind.is_some_and(|kind| installed.contains(&kind))
         {
-            dialog.set_kind(installed.first().copied(), &self.roles);
+            // The last dialog's agent and role come back when the host has
+            // that agent.
+            let last = self
+                .last_launch
+                .kind
+                .filter(|kind| installed.contains(kind));
+            dialog.set_kind(last.or(installed.first().copied()), &self.roles);
+            if last.is_some() {
+                dialog.choose_role(self.last_launch.role, &self.roles);
+            }
         }
     }
 
@@ -257,7 +332,13 @@ impl OrchestratorView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.item_hidden(&item) {
+            return;
+        }
         self.activate(&item);
+        if self.bound_hidden(&item) {
+            return;
+        }
         let Some(found) = self.item(&item) else {
             return;
         };
@@ -285,7 +366,8 @@ impl OrchestratorView {
             .installed
             .as_ref()
             .and_then(|installed| installed.first().copied());
-        let focus = extra.read(cx).focus.clone();
+        // The branch field, as the folded fields are not drawn yet.
+        let focus = branch.read(cx).focus.clone();
         self.dialog = Some(Dialog {
             item,
             profile: None,
@@ -297,6 +379,7 @@ impl OrchestratorView {
             host: None,
             problem: None,
             review,
+            more: launch::More::default(),
         });
         self.select_agent_host(cx);
         window.focus(&focus, cx);
@@ -304,7 +387,9 @@ impl OrchestratorView {
     }
 
     pub(super) fn close_overlays(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
-        let open = self.dialog.take().is_some() | self.confirm.take().is_some();
+        let dialog = self.dialog.take();
+        self.remember_launch(dialog.as_ref());
+        let open = dialog.is_some() | self.confirm.take().is_some();
         if open {
             window.focus(&self.focus, cx);
             cx.notify();
@@ -313,6 +398,15 @@ impl OrchestratorView {
     }
 
     fn submit_dispatch(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // A repository hidden since the dialog opened starts nothing.
+        if self
+            .dialog
+            .as_ref()
+            .is_some_and(|dialog| self.bound_hidden(&dialog.item))
+        {
+            self.close_overlays(window, cx);
+            return;
+        }
         // The dialog's item is in the active repository, which the dialog
         // made active when it opened.
         let (snapshot, workspace_id) = match self.repos.get(self.active) {
@@ -329,25 +423,25 @@ impl OrchestratorView {
                     .as_ref()
                     .is_some_and(|agents| agents.contains(kind))
         }) else {
-            dialog.problem = Some(Problem::Agent);
+            dialog.fail(Problem::Agent);
             cx.notify();
             return;
         };
         let branch = dialog.branch.read(cx).text().trim().to_owned();
         if !prompt::valid_branch(&branch) {
-            dialog.problem = Some(Problem::Branch);
+            dialog.fail(Problem::Branch);
             cx.notify();
             return;
         }
         let extra = dialog.extra.read(cx).text().to_owned();
         if extra.len() > MAX_EXTRA {
-            dialog.problem = Some(Problem::Extra);
+            dialog.fail(Problem::Extra);
             cx.notify();
             return;
         }
         let model = dialog.model.read(cx).text().trim().to_owned();
         if !model.is_empty() && !valid_model(&model) {
-            dialog.problem = Some(Problem::Model);
+            dialog.fail(Problem::Model);
             cx.notify();
             return;
         }
@@ -395,9 +489,20 @@ impl OrchestratorView {
             }),
             None => self.act(Action::Dispatch(Box::new(request))),
         }
-        self.dialog = None;
+        let dialog = self.dialog.take();
+        self.remember_launch(dialog.as_ref());
         window.focus(&self.focus, cx);
         cx.notify();
+    }
+
+    /// Keeps the agent and role of a closing dialog for the next one.
+    fn remember_launch(&mut self, dialog: Option<&Dialog>) {
+        if let Some(dialog) = dialog {
+            self.last_launch = Last {
+                kind: dialog.kind,
+                role: dialog.role,
+            };
+        }
     }
 
     /// Hands `action` to the worker, or says why it could not take it.
@@ -421,6 +526,10 @@ impl OrchestratorView {
     /// Sends the message field's text to the newest run of the open item.
     pub(super) fn send_message(&mut self, cx: &mut Context<Self>) {
         let text = self.message.read(cx).text().trim().to_owned();
+        // The worker the page's actions go to may no longer be shown.
+        if self.open_item_hidden() {
+            return;
+        }
         let Some(detail) = &self.detail else {
             return;
         };
@@ -550,253 +659,33 @@ impl OrchestratorView {
                     )
                     .child(danger(look, key, verb).on_click(cx.listener(
                         move |this, _, window, cx| {
-                            match confirm.clone() {
-                                Confirm::Merge { method, target } => {
-                                    this.merge(method, &target, cx)
-                                }
-                                confirm => {
-                                    if let Some(action) = confirm.action() {
-                                        this.act(action);
-                                    }
-                                }
-                            }
-                            this.close_overlays(window, cx);
+                            this.confirm_overlay(confirm.clone(), window, cx);
                         },
                     ))),
             )
             .into_any_element()
     }
 
-    fn render_dialog(&self, dialog: &Dialog, cx: &mut Context<Self>) -> AnyElement {
-        let look = &self.look;
-        let theme = &look.theme;
-        let item = self
-            .snapshot()
-            .items
-            .iter()
-            .find(|item| item.key.canonical() == dialog.item);
-        let bead = item.is_some_and(|item| item.key.source.provider == Provider::Beads);
-        let host = match self
-            .target()
-            .cloned()
-            .unwrap_or(sheprd_client::ConnectTarget::Local)
-        {
-            sheprd_client::ConnectTarget::Ssh { target, .. } => target.clone(),
-            _ => fl!("orchestrator-this-machine"),
-        };
-        let section = |title: String, body: AnyElement| {
-            div()
-                .flex()
-                .flex_col()
-                .gap_1()
-                .child(look.label(title))
-                .child(body)
-        };
-        let field = |input: &Entity<SearchInput>| {
-            div()
-                .px_2()
-                .py(px(4.))
-                .rounded(px(corners::CONTROL))
-                .bg(rgb(theme.background))
-                .border_1()
-                .border_color(rgb(theme.active))
-                .child(input.clone())
-        };
-        let profiles = std::iter::once((None, fl!("orchestrator-profile-built-in"))).chain(
-            self.snapshot()
-                .profiles
-                .iter()
-                .enumerate()
-                .map(|(index, profile)| (Some(index), profile_label(profile, dialog.review))),
-        );
-        let segmented = segments(look).children(profiles.map(|(index, name)| {
-            segment(look, "profile", index, name, index == dialog.profile).on_click(cx.listener(
-                move |this, _, _, cx| {
-                    if let Some(dialog) = &mut this.dialog {
-                        dialog.profile = index;
+    /// The confirming button of `confirm`, which it held since it was
+    /// drawn. One whose repository the selection hides since, or whose
+    /// worker is no longer the one shown, sends nothing.
+    pub(super) fn confirm_overlay(
+        &mut self,
+        confirm: Confirm,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.confirm_hidden(&confirm) {
+            match confirm {
+                Confirm::Merge { method, target } => self.merge(method, &target, cx),
+                confirm => {
+                    if let Some(action) = confirm.action() {
+                        self.act(action);
                     }
-                    cx.notify();
-                },
-            ))
-        }));
-        // Only an agent some role fits shows the row.
-        let fitting: Vec<(Option<usize>, String)> = self
-            .roles
-            .iter()
-            .enumerate()
-            .filter(|(_, role)| dialog.kind.is_some_and(|kind| role.fits(kind)))
-            .map(|(index, role)| (Some(index), role.name.clone()))
-            .collect();
-        let roles = (!fitting.is_empty()).then(|| {
-            std::iter::once((None, fl!("orchestrator-role-default")))
-                .chain(fitting)
-                .map(|(index, name)| {
-                    segment(look, "role", index, name, index == dialog.role).on_click(cx.listener(
-                        move |this, _, _, cx| {
-                            if let Some(dialog) = &mut this.dialog {
-                                dialog.role = index;
-                            }
-                            cx.notify();
-                        },
-                    ))
-                })
-                .fold(segments(look), |el, segment| el.child(segment))
-                .into_any_element()
-        });
-        let agents: Vec<AgentKind> = self
-            .snapshot()
-            .installed
-            .as_ref()
-            .filter(|_| dialog.host == self.snapshot().installed_endpoint)
-            .map(|installed| installed.iter().copied().take(8).collect())
-            .unwrap_or_default();
-        let tiles = if agents.is_empty() {
-            look.muted(
-                if dialog.host == self.snapshot().installed_endpoint
-                    && self.snapshot().installed_error.is_some()
-                {
-                    fl!("orchestrator-agents-failed")
-                } else if self.snapshot().installed.is_none()
-                    || dialog.host != self.snapshot().installed_endpoint
-                {
-                    fl!("orchestrator-agents-looking")
-                } else {
-                    fl!("orchestrator-agents-none")
-                },
-            )
-            .into_any_element()
-        } else {
-            div()
-                .flex()
-                .flex_wrap()
-                .gap_2()
-                .children(agents.into_iter().map(|kind| {
-                    let on = dialog.kind == Some(kind);
-                    div()
-                        .id(SharedString::from(format!(
-                            "orchestrator-agent-{}",
-                            kind.name()
-                        )))
-                        .w(px(84.))
-                        .flex()
-                        .flex_col()
-                        .items_center()
-                        .gap_1()
-                        .py_2()
-                        .rounded(px(corners::CONTROL))
-                        .border_1()
-                        .border_color(rgb(if on { theme.primary() } else { theme.active }))
-                        .when(on, |el| el.bg(rgb(theme.primary_wash())))
-                        .cursor_pointer()
-                        .child(look.icon(agent_icon(kind.name()), 20., theme.foreground))
-                        .child(div().text_size(look.small()).child(kind.name()))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            if let Some(dialog) = &mut this.dialog {
-                                dialog.set_kind(Some(kind), &this.roles);
-                            }
-                            cx.notify();
-                        }))
-                }))
-                .into_any_element()
-        };
-        card(look)
-            .w(px(600.))
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .child(
-                        div()
-                            .flex_1()
-                            .text_size(px(look.ui.size + 3.))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child(if dialog.review {
-                                fl!("orchestrator-review-with-agent")
-                            } else {
-                                fl!("orchestrator-dispatch-agent")
-                            }),
-                    )
-                    .child(look.chip(fl!("orchestrator-on-host", host = host)))
-                    .child(
-                        look.icon_button(
-                            "orchestrator-dialog-close",
-                            "icons/close.svg",
-                            fl!("orchestrator-close"),
-                        )
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.close_overlays(window, cx);
-                        })),
-                    ),
-            )
-            .when_some(item, |el, item| el.child(item_line(look, item)))
-            .when(bead, |el| {
-                el.child(
-                    look.muted(fl!("orchestrator-claims-task"))
-                        .debug_selector(|| "orchestrator-claims-task".into()),
-                )
-            })
-            .child(section(
-                fl!("orchestrator-section-prompt"),
-                segmented.into_any_element(),
-            ))
-            .child(section(fl!("orchestrator-section-agent"), tiles))
-            .when_some(roles, |el, roles| {
-                el.child(section(fl!("orchestrator-section-role"), roles))
-            })
-            // A bead's database stays on its own host, out of an agent's
-            // reach on any other.
-            .when_some(
-                (!bead).then(|| self.render_hosts(dialog, cx)).flatten(),
-                |el, hosts| el.child(section(fl!("orchestrator-section-host"), hosts)),
-            )
-            .child(section(
-                fl!("orchestrator-section-model"),
-                field(&dialog.model).into_any_element(),
-            ))
-            .child(section(
-                fl!("orchestrator-section-branch"),
-                field(&dialog.branch).into_any_element(),
-            ))
-            .child(section(
-                fl!("orchestrator-section-extra"),
-                field(&dialog.extra).into_any_element(),
-            ))
-            .when_some(dialog.problem, |el, problem| {
-                el.child(
-                    div()
-                        .text_size(look.small())
-                        .text_color(rgb(look.hue(super::look::RED)))
-                        .child(problem.text()),
-                )
-            })
-            .child(
-                div()
-                    .flex()
-                    .gap_2()
-                    .child(div().flex_1())
-                    .child(
-                        look.button(
-                            "orchestrator-dialog-cancel",
-                            fl!("orchestrator-cancel"),
-                            false,
-                        )
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.close_overlays(window, cx);
-                        })),
-                    )
-                    .child(
-                        look.button(
-                            "orchestrator-dialog-dispatch",
-                            fl!("orchestrator-dispatch"),
-                            true,
-                        )
-                        .on_click(
-                            cx.listener(|this, _, window, cx| this.submit_dispatch(window, cx)),
-                        ),
-                    ),
-            )
-            .into_any_element()
+                }
+            }
+        }
+        self.close_overlays(window, cx);
     }
 
     /// Keys while the dialog is open: Enter dispatches, Escape cancels.

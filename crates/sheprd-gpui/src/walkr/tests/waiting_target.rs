@@ -18,15 +18,21 @@ fn pending(id: &str, hour: u32) -> Pending {
         id: id.to_owned(),
         created: Utc.with_ymd_and_hms(2026, 11, 1, hour, 0, 0).single(),
         title: None,
+        repo: None,
     }
 }
 
-fn tally(pages: Vec<Pending>, repo: &str) -> Tally {
+fn tally(mut pages: Vec<Pending>, repo: &str) -> Tally {
+    for page in &mut pages {
+        page.repo = Some(repo.to_owned());
+    }
     Tally {
         waiting: pages.len(),
         newest: pages,
-        repo: Some(repo.to_owned()),
         sessions: 0,
+        live: false,
+        open: Vec::new(),
+        complete: true,
     }
 }
 
@@ -206,7 +212,7 @@ fn a_waiting_local_session_with_no_run_asks_for_its_page(cx: &mut gpui::TestAppC
             view.walkr.waiting.test_home(&Machine::Local, home.path());
             view.click_walkr(window, cx);
             let remote = view.walkr.waiting.remote.as_ref().unwrap();
-            assert!(remote.machine.is_local() && remote.id == id);
+            assert!(remote.machine.is_local() && remote.id.as_deref() == Some(id));
         });
     });
     cx.run_until_parked();

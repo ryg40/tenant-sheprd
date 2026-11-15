@@ -2557,6 +2557,22 @@ window at once, and `sheprd ui panel NAME` shows a section.
   the selected host is read; another host shows what was read while it was
   selected.
 
+`[artifacts] url` (**Settings > Sidebar > Artifacts**) adds an **Artifacts**
+button over Settings. The button also shows without the setting when the
+user's `artifacts` program is installed: it comes from the tenant-pi kit, not
+from Sheprd, and Sheprd looks for it on `PATH`, then in `~/.local/bin`, on
+Linux and macOS only. With the program, a click reads its status first: a
+server that answers opens its page, and a stopped local server opens a
+question that names the page and the program file; Sheprd starts the server
+only after **Start**, never by itself, and leaves it running when it quits.
+A set `url` wins: unless the program's page has its origin, or when the
+program gives no answer, the click opens `url` as before. A loopback address
+such as `http://127.0.0.1:6790/` is the computer where Sheprd runs. The page
+opens in a browser tab of the focused workspace, reusing its tab: on macOS, on
+Windows, and on a Linux build with the `servo` feature. Other Linux builds
+open it in the system browser. `sheprd artifacts` does the same from a
+terminal (`docs/cli.md`).
+
 When Overview or a section opens an agent's pane, the title bar's Back returns
 to it before walking back through panes.
 

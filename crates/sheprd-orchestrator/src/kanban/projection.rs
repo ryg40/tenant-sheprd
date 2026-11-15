@@ -101,6 +101,20 @@ pub fn project_ordered<'a, R: Clone + 'a>(
     order: &[LaneKey],
     matches: impl Fn(&LaneKey, Option<&Item>) -> bool,
 ) -> Result<Board<R>> {
+    project_ranked(roster, cards, mappings, order, |_, _| None, matches)
+}
+
+/// Like [`project_ordered`], and each lane's cards follow `rank` (the
+/// local order of implementation by lane and native ID) before the cell
+/// caps. Unranked cards keep canonical order after the ranked ones.
+pub fn project_ranked<'a, R: Clone + 'a>(
+    roster: impl IntoIterator<Item = LaneInput<'a, R>>,
+    cards: impl IntoIterator<Item = CardInput<'a, R>>,
+    mappings: &Mappings,
+    order: &[LaneKey],
+    rank: impl Fn(&LaneKey, &str) -> Option<usize>,
+    matches: impl Fn(&LaneKey, Option<&Item>) -> bool,
+) -> Result<Board<R>> {
     let mut lanes: BTreeMap<String, LaneKey> = BTreeMap::new();
     let mut checkouts = HashSet::new();
     for input in roster {
@@ -174,7 +188,9 @@ pub fn project_ordered<'a, R: Clone + 'a>(
     let mut lanes: Vec<_> = lanes.into_iter().collect();
     lanes.sort_by_key(|(_, key)| ranks.get(key).copied().unwrap_or(usize::MAX));
     for (canonical, key) in lanes {
-        let inputs = grouped.remove(&canonical).unwrap_or_default();
+        let mut inputs = grouped.remove(&canonical).unwrap_or_default();
+        // A stable sort keeps canonical order among unranked cards.
+        inputs.sort_by_key(|input| rank(&key, &input.item.key.native_id).unwrap_or(usize::MAX));
         let mut cells: Vec<Cell<R>> = BoardColumn::ALL
             .iter()
             .map(|column| Cell {

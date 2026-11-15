@@ -112,6 +112,10 @@ desktop margins must not be baked into these images. The paw fits both masks.
 `issue.svg`, `beads.svg`, `user.svg`, `cpu.svg`, and `brain.svg` are original
 interface artwork.
 `kanban.svg` is original Apache-2.0 interface artwork: three rounded vertical bars.
+`scroll.svg` is original Apache-2.0 interface artwork drawn for this fork: a
+rolled-up scroll, for the Artifacts button.
+`walkr.svg` is original Apache-2.0 interface artwork drawn for this fork: a bare
+footprint, for Walkr.
 GPUI renders these as masks tinted by the current theme.
 
 `gitlab.svg` is GitLab's tanuki mark from

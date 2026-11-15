@@ -326,9 +326,9 @@ run `sheprd config set tab_labels.agent_title true`.
 ### Artifacts
 
 The activity bar shows an Artifacts button when `[artifacts] url` is set, or
-when the user's `artifacts` program is installed. The program comes from the
-tenant-pi kit, which links it as `~/.local/bin/artifacts`; it is not part of
-Sheprd. Sheprd looks for it on `PATH`, then in `~/.local/bin`, once at start
+when the user's `artifacts` program is installed. The program is not part of
+Sheprd; [The `artifacts` program](#the-artifacts-program) below says what
+Sheprd asks of it. Sheprd looks for it on `PATH`, then in `~/.local/bin`, once at start
 and on each config reload, off the UI thread, and runs nothing then. Sheprd
 looks for it only on Linux and macOS: on Windows the program is never found,
 the button needs `[artifacts] url`, and `sheprd artifacts status`, `start`,
@@ -363,6 +363,30 @@ and leaves it running when it quits.
 
 Each waits at most 20 seconds for the program's status. Only one run of the
 program goes on at a time in the app: a request during another exits 6.
+
+#### The `artifacts` program
+
+Any executable file named `artifacts` can serve. One source is the
+[tenant-pi kit](https://github.com/ryg40/tenant-pi), which links it as
+`~/.local/bin/artifacts`. Sheprd finds the first executable regular file of
+that name in an absolute directory of `PATH`, then `~/.local/bin/artifacts`.
+It runs the program with no input, with `PATH` set to also reach
+`~/.local/bin`. A run that prints more than 4096 bytes to standard output is
+stopped and counts as failed. Exit
+status 0 means success; any other status is a failed run, and Sheprd keeps
+a short tail of standard error as its reason. Sheprd ends a run that prints
+nothing for longer than its bound.
+
+| Run | Bound | What Sheprd expects |
+| --- | --- | --- |
+| `artifacts --json status` | 15 s | One JSON object: `state` is `running`, `stopped`, `remote`, `unreachable`, or `unconfigured`, and the optional `url` is the server's page, an `http` or `https` address. Other fields are ignored. An unknown state or a bad `url` is a failed run |
+| `artifacts start` | 90 s | Starts the local server. The last line that is not blank, when it is an `http` or `https` address, names the server that started. If it is not the server Sheprd asked about, Sheprd opens nothing and shows that address |
+| `artifacts off` | 30 s | Stops each local server of this user, and exits 0 also when none ran |
+
+Sheprd runs `status` on a click and for each `sheprd artifacts` command, and runs
+`start` or `off` only after the user confirms in the window. Without the
+program, the button shows only when `[artifacts] url` is set and opens that
+page, and `sheprd artifacts status`, `start`, and `off` exit 8.
 
 ### Remote control
 

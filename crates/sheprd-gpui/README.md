@@ -2559,9 +2559,9 @@ window at once, and `sheprd ui panel NAME` shows a section.
 
 `[artifacts] url` (**Settings > Sidebar > Artifacts**) adds an **Artifacts**
 button over Settings. The button also shows without the setting when the
-user's `artifacts` program is installed: it comes from the tenant-pi kit, not
-from Sheprd, and Sheprd looks for it on `PATH`, then in `~/.local/bin`, on
-Linux and macOS only. With the program, a click reads its status first: a
+user's `artifacts` program is installed. The program is not part of Sheprd
+([its contract](../../docs/cli.md#the-artifacts-program)), and Sheprd looks
+for it on `PATH`, then in `~/.local/bin`, on Linux and macOS only. With the program, a click reads its status first: a
 server that answers opens its page, and a stopped local server opens a
 question that names the page and the program file; Sheprd starts the server
 only after **Start**, never by itself, and leaves it running when it quits.

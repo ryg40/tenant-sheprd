@@ -1,3 +1,26 @@
+# tenant-sheprd
+
+tenant-sheprd is an unofficial fork of
+[Sheprd](https://github.com/sheprd-labs/sheprd). It is not made, endorsed, or
+supported by the Sheprd project. The fork adds:
+
+- Forgejo issues and pull requests in the orchestrator ([Forgejo](docs/orchestrator.md#forgejo)).
+- A Kanban board of issues, with confirmed moves of Forgejo issues ([Kanban model](docs/orchestrator.md#kanban-model)).
+- Walkr, a browser review section of the activity bar ([docs/walkr.md](docs/walkr.md)).
+- The Artifacts button, which opens the page of an artifact server ([Artifacts](docs/cli.md#artifacts)).
+- Agent roles: a dispatched agent can start with a system prompt from a file ([Agent roles](docs/orchestrator.md#agent-roles)).
+- Repository selection for the Pull requests, Issues, Tasks, and Kanban sections ([Active repositories](docs/orchestrator.md#active-repositories)).
+
+The fork is source only: it has no builds, releases, or app updates of its own.
+The badges, links, and install steps below are those of upstream Sheprd and
+install upstream builds. Build the fork from source.
+
+tenant-sheprd modifies upstream files after upstream commit `72b49b1b`. To see
+what changed in a file, compare it with the same file in upstream Sheprd at
+that commit.
+
+---
+
 <p align="center">
   <img src="assets/icons/sheprd-icon-badge.png" alt="Sheprd app icon with a notification badge" width="176" height="176">
 </p>
@@ -5,13 +28,13 @@
 <h1 align="center">Sheprd</h1>
 
 <p align="center">
-  <a href="https://github.com/sheprd-labs/sheprd/actions/workflows/ci.yml"><img src="https://github.com/sheprd-labs/sheprd/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://discord.gg/GE4JRp8kaX"><img src="https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white" alt="Join the Sheprd Discord"></a>
+  <a href="https://github.com/sheprd-labs/sheprd/actions/workflows/ci.yml"><img src="https://github.com/sheprd-labs/sheprd/actions/workflows/ci.yml/badge.svg" alt="Upstream Sheprd CI"></a>
+  <a href="https://discord.gg/GE4JRp8kaX"><img src="https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white" alt="Join the upstream Sheprd Discord"></a>
 </p>
 
 <p align="center">
-  <a href="https://sheprd.org"><b>sheprd.org</b></a> ·
-  <a href="https://github.com/sheprd-labs/sheprd/releases">Releases</a> ·
+  Upstream: <a href="https://sheprd.org"><b>sheprd.org</b></a> ·
+  <a href="https://github.com/sheprd-labs/sheprd/releases">upstream releases</a> ·
   <a href="docs/updating.md">App updates</a> ·
   <a href="docs/cli.md">Command line</a> ·
   <a href="crates/sheprd-gpui/README.md">GUI scope &amp; configuration</a> ·
@@ -24,8 +47,8 @@ A native Rust/GPUI workspace for terminals and AI agents on macOS, Linux, and
 Windows. Organize repositories, worktrees, tabs and splits; chat with agents,
 review their changes, track pull requests and usage, and work across local,
 SSH and cloud machines. Browser previews, automations, mods and phone remote
-control connect those workflows in one app. The iPhone and iPad app is in a
-[TestFlight beta](https://sheprd.org/testflight/).
+control connect those workflows in one app. The iPhone and iPad app of
+upstream Sheprd is in a [TestFlight beta](https://sheprd.org/testflight/).
 
 Sheprd supports both an existing [Herdr](https://herdr.dev/) daemon and
 [herdr-core terminals](crates/sheprd-gpui/README.md#herdr-2-terminals). Releases

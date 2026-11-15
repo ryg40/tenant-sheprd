@@ -461,15 +461,16 @@ prompt guards is the profile author's to keep.
 ## Agent roles
 
 A role starts a dispatched agent with a system prompt from a file, for
-example a coordinator role that plans, delegates, and reviews. A prompt
-profile changes only the first message; a role changes the agent's system
-prompt. Sheprd ships no role. Add one to `config-gpui.local.toml`:
+example a planning role that splits work into steps before it writes code.
+A prompt profile changes only the first message; a role changes the agent's
+system prompt. A role is optional: without one, the agent starts with its own
+default prompt. Sheprd ships no role. Add one to `config-gpui.local.toml`:
 
 ```toml
 [[agent_roles]]
-name = "tenant-pi coordinator"
+name = "Planning agent"
 agents = ["claude", "pi"]
-prompt_file = "~/.local/state/tenant-pi/claude-role/coordinator.md"
+prompt_file = "~/.config/sheprd/prompts/planner.md"
 ```
 
 - `name` is the label in the dispatch dialog.
@@ -500,7 +501,7 @@ and the branch, then the prompt profile and the extra instructions when
 they are not the default. It quotes the first line of the extra
 instructions, cut with an ellipsis. In a review, it also says when the
 profile replaces the built-in review prompt. The start button names the agent and the role,
-for example "Start Pi as tenant-pi coordinator". The review dialog of a
+for example "Start Pi as Planning agent". The review dialog of a
 pull request has the same layout.
 
 Each orchestrator view remembers the agent and role of its last dialog

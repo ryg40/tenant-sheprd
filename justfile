@@ -305,18 +305,38 @@ test-pr-closure:
     PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_close_low_confidence_prs.py
 
 # Tests of the portable snapshot tooling, in temporary repositories without network.
+# The tooling stays in the private copy: a published snapshot has no
+# scripts/portable/, and this recipe then passes.
 test-portable:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ ! -e scripts/portable ]; then
+        echo "test-portable: the portable snapshot tooling (scripts/portable/) is not in this copy; nothing to test."
+        exit 0
+    fi
     PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/portable/tests
 
-# Check the publish set of HEAD and scan it for host values and secrets
-# (docs/portable-release.md). Reads Git objects only; needs the local deny list.
+# Check the publish set of HEAD and scan it for host values and secrets.
+# Reads Git objects only; needs the local deny list and the private tooling.
 portable-check: test-portable
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ ! -d scripts/portable ]; then
+        echo "portable-check: the portable snapshot tooling (scripts/portable/) is not in this copy." >&2
+        exit 1
+    fi
     python3 scripts/portable/publish_check.py
     python3 scripts/portable/scan.py publish-set HEAD
 
 # Build the sanitized snapshot of HEAD on the local `portable` branch and print
 # the push plan. Pushes nothing without `--push`, which the owner approves first.
 portable-snapshot *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ ! -d scripts/portable ]; then
+        echo "portable-snapshot: the portable snapshot tooling (scripts/portable/) is not in this copy." >&2
+        exit 1
+    fi
     python3 scripts/portable/publish_portable.py {{args}}
 
 ci: format-check check-file-size check-sorted check-i18n check-artwork lint test test-mockup-wait test-pr-closure test-portable

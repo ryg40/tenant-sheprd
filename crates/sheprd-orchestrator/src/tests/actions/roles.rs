@@ -51,7 +51,7 @@ fn a_missing_prompt_file_refuses_the_dispatch_before_any_worktree() {
     let missing = dir.path().join("no-such-role.md");
     let mut with_role = request();
     with_role.role = Some(Role {
-        name: "tenant-pi coordinator".into(),
+        name: "Planning agent".into(),
         agents: vec!["claude".into(), "pi".into()],
         prompt_file: missing.to_string_lossy().into_owned(),
     });

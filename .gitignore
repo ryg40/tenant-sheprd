@@ -27,8 +27,8 @@ id_ed25519*
 # Machine-local mise overrides.
 mise.local.toml
 
-# Machine-local notes and the local deny list of the portable scan
-# (docs/portable-release.md). The list holds the values it forbids.
+# Machine-local notes and the local deny list of the portable snapshot scan.
+# The list holds the values it forbids.
 /.local/
 
 # Wrangler local state for the site Worker.

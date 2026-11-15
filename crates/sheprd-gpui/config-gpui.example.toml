@@ -526,10 +526,10 @@ size = 12
 # [px0]
 # url = "http://127.0.0.1:7777/"
 
-# An artifact server's page (http or https). While url is set, or while the
-# artifacts program of the tenant-pi kit is installed (on PATH or in
-# ~/.local/bin, Linux and macOS only), the activity bar shows an Artifacts
-# button beside Settings. With the program, a click reads its status and
+# An artifact server's page (http or https). While url is set, or while an
+# artifacts program is installed (on PATH or in ~/.local/bin, Linux and macOS
+# only; docs/cli.md, "The artifacts program", has its contract), the activity
+# bar shows an Artifacts button beside Settings. With the program, a click reads its status and
 # opens the page; Sheprd starts a stopped local server only after you say yes.
 # A url of another origin than the program's page wins. A loopback address
 # such as 127.0.0.1 is the computer where Sheprd runs. The page opens as a

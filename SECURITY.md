@@ -1,5 +1,10 @@
 # Security Policy
 
+This copy is tenant-sheprd, an unofficial fork of
+[Sheprd](https://github.com/sheprd-labs/sheprd). Report a vulnerability in
+this fork to the fork, as below. The fork publishes source only and has no
+builds of its own. The release and update text below describes upstream Sheprd.
+
 ## Supported Versions
 
 Sheprd uses calendar-versioned releases. Only the current
@@ -8,7 +13,7 @@ Sheprd uses calendar-versioned releases. Only the current
 ## Reporting a Vulnerability
 
 Report privately through GitHub's
-[security advisory form](https://github.com/sheprd-labs/sheprd/security/advisories/new).
+[security advisory form](https://github.com/ryg40/tenant-sheprd/security/advisories/new).
 Please do not open a public issue for a suspected vulnerability.
 
 Include the affected commit, your macOS and Rust versions, what an attacker

@@ -10,20 +10,20 @@ use {
     super::{Drawn, snap},
     crate::browser::{
         TabId, Zoom,
-        engine::{self, Command, Engine, Latest, Mailbox, PageKey, keys},
+        engine::{self, Command, Engine, Input, Latest, Mailbox, PageKey, keys, popup},
         reports::{Event, Source, report},
     },
     gpui::{
-        App, Bounds, Corners, CursorStyle, DispatchPhase, Div, Element, ElementId, FocusHandle,
-        GlobalElementId, Hitbox, HitboxBehavior, InspectorElementId, InteractiveElement,
-        IntoElement, KeyDownEvent, KeyUpEvent, LayoutId, MouseButton, MouseDownEvent,
-        MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point, RenderImage, ScrollDelta,
-        ScrollEvent, Size, Style, Styled, Window, div, px, size,
+        App, Bounds, Corners, DispatchPhase, Div, Element, ElementId, FocusHandle, GlobalElementId,
+        Hitbox, HitboxBehavior, InspectorElementId, InteractiveElement, IntoElement, KeyDownEvent,
+        KeyUpEvent, LayoutId, ModifiersChangedEvent, MouseButton, MouseDownEvent, MouseMoveEvent,
+        MouseUpEvent, ParentElement, Pixels, Point, RenderImage, ScrollDelta, ScrollEvent, Size,
+        Style, Styled, Window, div, px, size,
     },
     servo::{
-        DevicePoint, InputEvent, MouseButton as PageButton, MouseButtonAction, MouseButtonEvent,
-        MouseLeftViewportEvent, MouseMoveEvent as PageMove, WebViewPoint, WheelDelta, WheelEvent,
-        WheelMode,
+        DevicePoint, InputEvent, Modifiers, MouseButton as PageButton, MouseButtonAction,
+        MouseButtonEvent, MouseLeftViewportEvent, MouseMoveEvent as PageMove, WebViewPoint,
+        WheelDelta, WheelEvent, WheelMode,
     },
     std::{
         cell::{Cell, RefCell},
@@ -32,6 +32,7 @@ use {
     },
 };
 
+mod clipboard;
 mod select;
 
 pub(crate) use select::Colors;
@@ -139,15 +140,40 @@ impl Page {
     }
 
     /// Hands the page a press, a key, or a wheel turn, after the pointer's
-    /// place if one still waits, so the page hears them in order.
-    fn input(&self, event: InputEvent) {
+    /// place if one still waits, so the page hears them in order. `held`,
+    /// the modifier keys the user holds, goes with it while the page takes
+    /// them ([`Self::takes_modifiers`]).
+    fn input(&self, event: InputEvent, held: Option<gpui::Modifiers>) {
         self.input.set(true);
         if let Some((x, y)) = self.latest.take_moved() {
             let point = WebViewPoint::Device(DevicePoint::new(x, y));
             let moved = InputEvent::MouseMove(PageMove::new(point));
-            self.send(|key| Command::Input(key, Box::new(moved)));
+            self.send(|key| Command::Input(key, Box::new(moved.into())));
         }
-        self.send(|key| Command::Input(key, Box::new(event)));
+        // A press, and a paste, copy, or cut key, get their grants as they
+        // leave the window, so an end of the grants that overtakes them in
+        // the engine ends those.
+        let now = std::time::Instant::now();
+        let grants = &self.mailbox.clipboard;
+        let input = Input {
+            activation: popup::activation(&event, grants, now),
+            held: held.filter(|_| self.takes_modifiers()).map(keys::held),
+            pressed: grants.pressed(&event, now),
+            event,
+        };
+        self.send(|key| Command::Input(key, Box::new(input)));
+    }
+
+    /// Tells the engine which modifier keys the user holds, so that Servo's
+    /// set holds those (`engine/modifiers.rs`).
+    pub(in crate::browser) fn hold(&self, held: gpui::Modifiers) {
+        self.send(|key| Command::Held(key, keys::held(held)));
+    }
+
+    /// Whether the page hears the modifier keys change: only while it has
+    /// the keyboard and no list of it is open, which keeps its own keys.
+    fn takes_modifiers(&self) -> bool {
+        self.focused.get() && !self.lists()
     }
 
     /// Tells the page where the pointer is. Only the latest place waits for
@@ -158,6 +184,12 @@ impl Page {
             // Nothing queued will read the place: the next move asks again.
             self.latest.take_moved();
         }
+    }
+
+    /// What the engine hands the window for the page: its frames, its
+    /// list, and the mark that its script stopped.
+    pub(in crate::browser) fn mailbox(&self) -> &Mailbox {
+        &self.mailbox
     }
 
     /// Whether the window sent the page input since this was last asked.
@@ -210,6 +242,8 @@ impl Page {
     pub(crate) fn blur(&self) {
         self.dismiss_list();
         if self.focused.replace(false) {
+            // The page hears no key it no longer has, nor its release.
+            self.hold(gpui::Modifiers::default());
             self.send(|key| Command::Focused(key, false));
         }
     }
@@ -338,7 +372,7 @@ impl IntoElement for PageElement {
     type Element = Div;
 
     fn into_element(self) -> Self::Element {
-        let (down, up) = (self.page.clone(), self.page.clone());
+        let (down, up, held) = (self.page.clone(), self.page.clone(), self.page.clone());
         let list = select::element(&self.page, self.colors);
         div()
             .size_full()
@@ -350,7 +384,7 @@ impl IntoElement for PageElement {
                 if down.focused.get() {
                     if !down.list_key(event, window) {
                         down.keyed();
-                        down.input(keys::down(event));
+                        down.input(keys::down(event), None);
                     }
                     cx.stop_propagation();
                 }
@@ -358,9 +392,15 @@ impl IntoElement for PageElement {
             .on_key_up(move |event: &KeyUpEvent, _, cx| {
                 if up.focused.get() {
                     if !up.list_key_up(event) {
-                        up.input(keys::up(event));
+                        up.input(keys::up(event), None);
                     }
                     cx.stop_propagation();
+                }
+            })
+            // GPUI sends no key event for a modifier key, only this.
+            .on_modifiers_changed(move |event: &ModifiersChangedEvent, _, _| {
+                if held.takes_modifiers() {
+                    held.hold(event.modifiers);
                 }
             })
             .child(Surface {
@@ -476,7 +516,7 @@ impl Element for Surface {
                 tracing::debug!(%error, "Could not paint a page's frame");
             }
         }
-        window.set_cursor_style(CursorStyle::Arrow, &hitbox);
+        window.set_cursor_style(page.mailbox.cursor.get(), &hitbox);
         self.listen(hitbox, area, scale, window);
     }
 }
@@ -502,16 +542,18 @@ impl Surface {
                 cx.stop_propagation();
                 return;
             }
+            // The keyboard first, so the press carries the keys held.
             page.take_keyboard(window, cx);
             page.pressed_at(event.position - area.origin);
             if !page.pressed.borrow().contains(&event.button) {
                 page.pressed.borrow_mut().push(event.button);
             }
-            page.input(InputEvent::MouseButton(MouseButtonEvent::new(
+            let press = MouseButtonEvent::new(
                 MouseButtonAction::Down,
                 page_button(event.button),
                 page_point(event.position, area, scale),
-            )));
+            );
+            page.input(InputEvent::MouseButton(press), Some(event.modifiers));
             cx.stop_propagation();
         });
         let (page, over) = (self.page.clone(), hitbox.clone());
@@ -528,11 +570,12 @@ impl Surface {
                 pressed.len() != before
             };
             if pressed || over.is_hovered(window) {
-                page.input(InputEvent::MouseButton(MouseButtonEvent::new(
+                let release = MouseButtonEvent::new(
                     MouseButtonAction::Up,
                     page_button(event.button),
                     page_point(event.position, area, scale),
-                )));
+                );
+                page.input(InputEvent::MouseButton(release), Some(event.modifiers));
             }
         });
         let (page, over) = (self.page.clone(), hitbox.clone());
@@ -545,9 +588,10 @@ impl Surface {
                 let (x, y) = device_point(event.position, area, scale);
                 page.moved(x, y);
             } else if page.hovered.get() {
-                page.input(InputEvent::MouseLeftViewport(MouseLeftViewportEvent {
+                let left = MouseLeftViewportEvent {
                     focus_moving_to_another_iframe: false,
-                }));
+                };
+                page.input(InputEvent::MouseLeftViewport(left), None);
             }
             page.hovered.set(inside);
         });
@@ -569,7 +613,18 @@ impl Surface {
             let point = page_point(event.position, area, scale);
             // The control moves with the page, and its list would not.
             page.dismiss_list();
-            page.input(InputEvent::Wheel(WheelEvent::new(delta, point)));
+            // The page reads the keys held from Servo's own set, which the
+            // keys that go with the turn bring up to date in a page that has
+            // the keyboard. Over another page the turn goes without keys,
+            // and the engine empties the set first: Ctrl+wheel there is a
+            // plain wheel (`engine/modifiers.rs`). `WheelEvent::new` uses
+            // its keys only to turn a delta with no horizontal part sideways
+            // when Shift is held. With Shift, GPUI's X11 and Wayland backends
+            // already give a horizontal delta, so that turn would change
+            // nothing: it gets no keys and keeps the delta as GPUI gave it.
+            let unturned = Modifiers::empty();
+            let wheel = WheelEvent::new(delta, point, unturned);
+            page.input(InputEvent::Wheel(wheel), Some(event.modifiers));
             cx.stop_propagation();
         });
     }

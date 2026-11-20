@@ -63,7 +63,7 @@ fn folders_come_first_and_git_is_never_listed() {
 }
 
 #[test]
-fn a_huge_folder_stays_bounded_and_says_there_is_more() {
+fn a_huge_folder_stays_bounded_and_counts_what_it_leaves_out() {
     let (_dir, root, _) = fixture();
     let big = root.join("big");
     fs::create_dir(&big).unwrap();
@@ -72,7 +72,7 @@ fn a_huge_folder_stays_bounded_and_says_there_is_more() {
     }
     let listing = list(&root, "big", &not_cancelled()).unwrap();
     assert!(listing.entries.len() <= MAX_ENTRIES);
-    assert!(listing.more);
+    assert_eq!(listing.omitted, Omitted::Exactly(50));
 }
 
 #[test]

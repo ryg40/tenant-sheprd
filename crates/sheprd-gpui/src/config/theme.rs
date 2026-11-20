@@ -376,6 +376,7 @@ pub(crate) fn mix(base: u32, over: u32, percent: u32) -> u32 {
 /// Popular Ghostty theme files compiled in from iTerm2-Color-Schemes (see
 /// `THEMES-NOTICE.md`), so every platform lists them without Ghostty. Each
 /// keeps its upstream file name, which is how an installed copy is matched.
+/// The Lavender and Torch files are Sheprd's own and have no upstream.
 macro_rules! bundled_themes {
     ($($name:literal),* $(,)?) => {
         const BUNDLED: &[(&str, &str)] = &[$((
@@ -409,6 +410,8 @@ bundled_themes![
     "Gruvbox Light",         // i18n: data
     "Gruvbox Material Dark", // i18n: data
     "Kanagawa Wave",         // i18n: data
+    "Lavender Gray",         // i18n: data
+    "Lavender Light",        // i18n: data
     "Material",              // i18n: data
     "Monokai Classic",       // i18n: data
     "Monokai Pro",           // i18n: data
@@ -425,6 +428,8 @@ bundled_themes![
     "TokyoNight Moon",       // i18n: data
     "TokyoNight Storm",      // i18n: data
     "Tomorrow Night",        // i18n: data
+    "Torch Dark",            // i18n: data
+    "Torch Light",           // i18n: data
 ];
 
 /// Bundled themes parsed once; the picker and menus resolve built-ins often.

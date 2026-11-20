@@ -9,6 +9,8 @@ pub enum Error {
     Busy,
     #[error(transparent)]
     Profile(#[from] super::profile::Error),
+    #[error("The page's script stopped: Servo's thread that ran it ended.")]
+    ScriptEnded,
     #[error("The engine that draws pages stopped. Restart Sheprd to open pages again.")]
     Stopped,
     #[error("Servo could not create a drawing surface for the page: {0}")]

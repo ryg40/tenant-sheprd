@@ -7,15 +7,25 @@ fn socket(pid: u32, number: u16, bind: Bind, process: &str) -> Socket {
         pid,
         number,
         bind,
+        bound: Vec::new(),
         process: process.into(),
     }
+}
+
+/// What `text` parses to, without the addresses `bind` sums up.
+fn parsed(text: &str) -> Vec<Socket> {
+    let mut sockets = parse(text).unwrap();
+    for socket in &mut sockets {
+        socket.bound.clear();
+    }
+    sockets
 }
 
 #[test]
 fn lsof_field_output_names_each_process_and_its_sockets() {
     let text = "lsof\np4242\ncnode\nf20\nn127.0.0.1:3000\nf21\nn[::1]:3000\np4343\ncpython3\nf3\nn*:8080\nf4\nn192.168.1.20:9000\n";
     assert_eq!(
-        parse(text).unwrap(),
+        parsed(text),
         vec![
             socket(4242, 3000, Bind::Loopback, "node"),
             socket(4343, 8080, Bind::Any, "python3"),
@@ -39,7 +49,7 @@ LISTEN 0      4096   0.0.0.0:8080       0.0.0.0:*         users:((\"python3\",pi
 LISTEN 0      128    0.0.0.0:22         0.0.0.0:*\n\
 LISTEN 0      4096   127.0.0.53%lo:53   0.0.0.0:*\n";
     assert_eq!(
-        parse(text).unwrap(),
+        parsed(text),
         vec![
             socket(4242, 5173, Bind::Loopback, "node"),
             socket(4343, 8080, Bind::Any, "python3"),
@@ -51,17 +61,14 @@ LISTEN 0      4096   127.0.0.53%lo:53   0.0.0.0:*\n";
 #[test]
 fn one_process_on_ipv4_and_ipv6_is_one_row_at_its_wider_bind() {
     let text = "lsof\np4242\ncnode\nn127.0.0.1:3000\nn*:3000\n";
-    assert_eq!(
-        parse(text).unwrap(),
-        vec![socket(4242, 3000, Bind::Any, "node")]
-    );
+    assert_eq!(parsed(text), vec![socket(4242, 3000, Bind::Any, "node")]);
 }
 
 #[test]
 fn malformed_and_untrusted_lines_are_dropped() {
     let text = "lsof\nn*:1\npnot-a-pid\ncx\nn*:2\np0\nn*:3\np4242\nc\u{1b}[31mnode\u{7}\nn*:0\nn*:70000\nnhost:3000\nn*:3001\n\nq\n";
     assert_eq!(
-        parse(text).unwrap(),
+        parsed(text),
         vec![socket(4242, 3001, Bind::Any, "[31mnode")]
     );
     let ss = "ss\nLISTEN 0 1 127.0.0.1:3000 0.0.0.0:* users:((\"node\",pid=x,fd=1))\nLISTEN\nESTAB 0 0 127.0.0.1:3000 127.0.0.1:5000 users:((\"node\",pid=4242,fd=9))\n";

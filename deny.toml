@@ -28,16 +28,6 @@ ignore = [
     # Field and variant order is part of protocol compatibility, so this is not
     # a swappable dependency. Revisit if an actual vulnerability is filed.
     { id = "RUSTSEC-2025-0141", reason = "bincode 2 is the daemon wire format; unmaintained, not vulnerable" },
-    # rsa 0.10.0-rc.19 comes only with sheprd-gpui's opt-in `servo` feature
-    # (Linux), through Servo's cargo feature `subtlecrypto`, and Servo 0.8.0 pins
-    # it exactly (`servo-script-webcrypto`). The advisory (Marvin Attack, a timing
-    # side channel in RSA private-key operations) lists `>= 0.10.0` as patched,
-    # so a release candidate is in its range; rc.19 has the move to
-    # `crypto-bigint` the advisory names, but its own README still calls the
-    # crate vulnerable. Page script can reach RSA signing and decryption through
-    # `crypto.subtle`, with a key that is the page's own; no other crate in the
-    # lock uses `rsa`. Remove this entry when Servo pins a fixed `rsa`.
-    { id = "RUSTSEC-2023-0071", reason = "rsa rc pinned by Servo, only with the opt-in `servo` feature; pages reach RSA private-key operations through crypto.subtle, on the page's own key; remove when Servo pins a fixed rsa" },
 ]
 
 # GHSA-38c5-483c-4qqp / CVE-2026-42199: integer overflow in grid's
@@ -102,3 +92,10 @@ allow-wildcard-paths = true
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+# Only with sheprd-gpui's opt-in `servo` feature (Linux). The root Cargo.toml
+# pins Servo to commit 1879c93bb85a45b41d6ade5820407eb70f5bc7ef of its main
+# branch, ahead of 0.9.0, and that commit takes the `stylo` crates from
+# servo/stylo at commit 53f67a4d1486efcd742ec3a700fa3f89f45fec7a. Remove both
+# entries when Servo 0.9.0 is on crates.io and the root Cargo.toml takes it
+# from there again.
+allow-git = ["https://github.com/servo/servo", "https://github.com/servo/stylo"]

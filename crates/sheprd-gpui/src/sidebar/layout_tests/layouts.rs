@@ -64,6 +64,9 @@ fn check_layouts(modes: &[crate::config::LayoutMode], cx: &mut gpui::TestAppCont
                 view.update(cx, |view, cx| {
                     view.config.layout.mode = mode;
                     view.config.sidebar.size = font_size;
+                    // As the user's own size, which desktop's `[ui]` face
+                    // takes too; the other layouts read it either way.
+                    view.config.sidebar_font_keys.size = true;
                     view.sidebar_width = Some(width);
                     cx.notify();
                 });
@@ -186,6 +189,13 @@ fn orca_layout_fits_the_sidebar(cx: &mut gpui::TestAppContext) {
 #[gpui::test]
 fn minimal_layout_fits_the_sidebar(cx: &mut gpui::TestAppContext) {
     check_layouts(&[crate::config::LayoutMode::Minimal], cx);
+}
+
+/// Headless text has one width per glyph, so this proves the boxes, not
+/// that the proportional face's real glyphs fit them.
+#[gpui::test]
+fn desktop_layout_fits_the_sidebar(cx: &mut gpui::TestAppContext) {
+    check_layouts(&[crate::config::LayoutMode::Desktop], cx);
 }
 
 #[gpui::test]

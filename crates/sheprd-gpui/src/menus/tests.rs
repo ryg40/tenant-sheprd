@@ -82,15 +82,26 @@ fn view_menu_lists_every_layout_in_groups_and_checks_the_current_one() {
                 _ => None,
             })
             .unwrap();
-        // Densities, their rounded versions, the other designs, then Devices.
-        let separators: Vec<usize> = layout
+        // Densities, their rounded versions, the other designs, then Devices:
+        // a separator leads each group after the first.
+        assert!(matches!(
+            layout.items.first(),
+            Some(MenuItem::Action { .. })
+        ));
+        let leaders: Vec<String> = layout
             .items
-            .iter()
-            .enumerate()
-            .filter(|(_, item)| matches!(item, MenuItem::Separator))
-            .map(|(index, _)| index)
+            .windows(2)
+            .filter_map(|pair| match pair {
+                [MenuItem::Separator, MenuItem::Action { name, .. }] => Some(name.to_string()),
+                _ => None,
+            })
             .collect();
-        assert_eq!(separators, vec![3, 7, 11]);
+        let groups = [
+            LayoutMode::new(Density::Normal, Style::Rounded),
+            LayoutMode::Superset,
+            LayoutMode::Devices,
+        ];
+        assert_eq!(leaders, groups.map(LayoutMode::label));
         let actions: Vec<_> = layout
             .items
             .iter()

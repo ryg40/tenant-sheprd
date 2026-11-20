@@ -559,6 +559,9 @@ impl SheprdWindow {
         if self.mod_panel_width.chosen().is_none() {
             self.mod_panel_width.restore(chrome.mod_panel_width);
         }
+        if self.file_tree_width.chosen().is_none() {
+            self.file_tree_width.restore(chrome.file_tree_width);
+        }
         if self.review_files_width.chosen().is_none() {
             self.review_files_width.restore(chrome.review_files_width);
         }

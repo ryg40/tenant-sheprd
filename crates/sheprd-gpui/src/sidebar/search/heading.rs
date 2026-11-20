@@ -85,7 +85,7 @@ impl SheprdWindow {
     ) -> Option<Div> {
         let input = self.heading_input(heading)?.clone();
         let theme = &self.theme;
-        let font = &self.config.sidebar;
+        let font = &*self.config.sidebar_font();
         let (focus, typed) = {
             let input = input.read(cx);
             (input.focus.clone(), !input.text().is_empty())

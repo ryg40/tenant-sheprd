@@ -6,7 +6,7 @@ use super::label_text;
 use crate::{
     config::{FontConfig, Theme},
     i18n::fl,
-    sidebar::{glyph_width, layout::SidebarMetrics, line_height},
+    sidebar::{layout::SidebarMetrics, line_height},
 };
 use gpui::{prelude::*, *};
 
@@ -73,7 +73,7 @@ impl RowBadge {
         font: &FontConfig,
         layout: &SidebarMetrics,
     ) -> f32 {
-        let glyph = glyph_width(font);
+        let glyph = layout.glyph(font);
         let counts = self.counts.as_ref().filter(|_| layout.pr_counts());
         counts.map_or(0., |counts| match counts.local {
             true => counts.chip_width(glyph, chip_icon(font)),
@@ -88,7 +88,7 @@ impl RowBadge {
         font: &FontConfig,
         layout: &SidebarMetrics,
     ) -> f32 {
-        let glyph = glyph_width(font);
+        let glyph = layout.glyph(font);
         let number = self.pr.as_ref().map_or(0, |pr| pr.number.chars().count());
         let pr = (glyph * number as f32).ceil();
         // Reserve the icon and the gap before the PR number, even at small fonts.
@@ -145,7 +145,7 @@ impl RowBadge {
                     .flex_none()
                     .flex()
                     .items_center()
-                    .gap(px(glyph_width(font)))
+                    .gap(px(layout.glyph(font)))
                     .overflow_hidden()
                     .when(muted, |line| {
                         line.child(
@@ -188,7 +188,7 @@ impl RowBadge {
             .when_some(counts.filter(|_| layout.pr_counts()), |column, badge| {
                 if badge.local {
                     let colors = (theme.ink(theme.palette[2]), theme.ink(theme.palette[1]));
-                    let chip = badge.chip(key, glyph_width(font), chip_icon(font), colors, theme);
+                    let chip = badge.chip(key, layout.glyph(font), chip_icon(font), colors, theme);
                     return column.child(chip.h(px(line_height(font))));
                 }
                 column.child(

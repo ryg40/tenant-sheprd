@@ -33,6 +33,7 @@ use crate::i18n::fl;
 use crate::{Command, SheprdWindow};
 use gpui::{prelude::*, *};
 use sheprd_client::ConnectTarget;
+use std::{cell::Cell, rc::Rc};
 
 pub(super) const MENU_GAP: f32 = 12.;
 
@@ -282,24 +283,9 @@ impl SheprdWindow {
         .size_full()
     }
 
-    pub(crate) fn render_device_footer(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let button_bounds = std::rc::Rc::new(std::cell::Cell::new(Bounds::<Pixels>::default()));
-        let painted_bounds = button_bounds.clone();
-        // The window owns this cell, so the Sessions shortcut opens the list
-        // where the picker opens, and it outlives this frame's rebuild.
-        let painted_sessions = self.sessions_anchor.clone();
-        let hint: SharedString = self
-            .config
-            .keybindings
-            .shortcuts(Command::Settings)
-            .next()
-            .map_or_else(
-                || fl!("devices-settings"),
-                |shortcut| fl!("devices-settings-shortcut", shortcut = shortcut.to_string()),
-            )
-            .into();
-        let foreground = self.theme.foreground;
-        let surface = self.theme.surface;
+    /// What the footer's picker names: the device the sidebar is scoped to,
+    /// how many, or all of them; and whether a device it lists is connected.
+    pub(crate) fn device_scope(&self) -> (String, bool) {
         let picked = self.device_filter.picked().count();
         let label = match self.device_filter.picked().next() {
             Some(id) if picked == 1 => self
@@ -313,6 +299,101 @@ impl SheprdWindow {
         let connected = self.endpoints.iter().any(|endpoint| {
             self.device_visible(&endpoint.id) && endpoint.live.status.is_connected()
         });
+        (label, connected)
+    }
+
+    /// The footer's Settings tooltip, with the shortcut when one is bound.
+    pub(crate) fn settings_hint(&self) -> SharedString {
+        self.config
+            .keybindings
+            .shortcuts(Command::Settings)
+            .next()
+            .map_or_else(
+                || fl!("devices-settings"),
+                |shortcut| fl!("devices-settings-shortcut", shortcut = shortcut.to_string()),
+            )
+            .into()
+    }
+
+    /// How many Coder workspaces are still being added, on the corner of
+    /// the picker's icon so its label keeps its room; `None` once none are.
+    pub(crate) fn device_adding_badge(&self) -> Option<Div> {
+        let pending = self.cloud_jobs_pending();
+        (pending > 0).then(|| {
+            div()
+                .debug_selector(|| "device-footer-adding".into())
+                .absolute()
+                .top(px(-6.))
+                .right(px(-8.))
+                .min_w(px(13.))
+                .h(px(13.))
+                .px(px(3.))
+                .rounded_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_size(px(9.))
+                .bg(colors::accent(&self.theme))
+                .text_color(rgb(self.theme.background))
+                .child(pending.to_string())
+        })
+    }
+
+    /// The picker's dot: the online color while a device it lists is
+    /// connected.
+    pub(crate) fn device_status_dot(&self, connected: bool) -> Div {
+        div()
+            .size(px(6.))
+            .flex_none()
+            .rounded_full()
+            .bg(rgb(if connected {
+                colors::online(&self.theme)
+            } else {
+                self.theme.muted
+            }))
+    }
+
+    /// Records where the picker painted into `bounds`, which its click
+    /// anchors the list to, and into the window's Sessions anchor, so the
+    /// Sessions shortcut opens the list where the picker does. The window
+    /// owns that cell, so it outlives this frame's rebuild.
+    pub(crate) fn device_picker_probe(&self, bounds: Rc<Cell<Bounds<Pixels>>>) -> Canvas<()> {
+        let sessions = self.sessions_anchor.clone();
+        canvas(
+            |_, _, _| (),
+            move |painted, _, _, _| {
+                bounds.set(painted);
+                sessions.set(painted.origin);
+            },
+        )
+        .absolute()
+        .inset_0()
+        .size_full()
+    }
+
+    /// Opens the device list from the picker whose corner is `origin`.
+    /// Anchored to the control, not the pointer, every click leaves the
+    /// same clear gap above it.
+    pub(crate) fn open_device_picker(
+        &mut self,
+        origin: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.open_menu(window, cx) {
+            self.menu.anchor = origin;
+            self.menu.page = Some(Page::Devices);
+            self.menu.selected = Some(0);
+        }
+    }
+
+    pub(crate) fn render_device_footer(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let button_bounds = Rc::new(Cell::new(Bounds::<Pixels>::default()));
+        let painted_bounds = button_bounds.clone();
+        let hint = self.settings_hint();
+        let foreground = self.theme.foreground;
+        let surface = self.theme.surface;
+        let (label, connected) = self.device_scope();
         // Beside the activity bar, which carries Settings, the picker leads
         // with the device's initials and says how many hosts there are.
         let bar = self.activity_bar_shown();
@@ -385,28 +466,7 @@ impl SheprdWindow {
                                     )
                                 }
                             })
-                            // How many Coder workspaces are still being added,
-                            // on the icon's corner so the label keeps its room.
-                            .when(self.cloud_jobs_pending() > 0, |icon| {
-                                icon.child(
-                                    div()
-                                        .debug_selector(|| "device-footer-adding".into())
-                                        .absolute()
-                                        .top(px(-6.))
-                                        .right(px(-8.))
-                                        .min_w(px(13.))
-                                        .h(px(13.))
-                                        .px(px(3.))
-                                        .rounded_full()
-                                        .flex()
-                                        .items_center()
-                                        .justify_center()
-                                        .text_size(px(9.))
-                                        .bg(colors::accent(&self.theme))
-                                        .text_color(rgb(self.theme.background))
-                                        .child(self.cloud_jobs_pending().to_string()),
-                                )
-                            }),
+                            .children(self.device_adding_badge()),
                     )
                     .child(div().flex_1().min_w_0().truncate().child(label.to_owned()))
                     .when(bar && hosts > 1, |picker| {
@@ -418,17 +478,7 @@ impl SheprdWindow {
                                 .child(fl!("devices-hosts", count = hosts)),
                         )
                     })
-                    .child(
-                        div()
-                            .size(px(6.))
-                            .flex_none()
-                            .rounded_full()
-                            .bg(rgb(if connected {
-                                colors::online(&self.theme)
-                            } else {
-                                self.theme.muted
-                            })),
-                    )
+                    .child(self.device_status_dot(connected))
                     .child(
                         svg()
                             .path("icons/chevron-up.svg")
@@ -436,26 +486,9 @@ impl SheprdWindow {
                             .flex_none()
                             .text_color(rgb(self.theme.muted)),
                     )
-                    .child(
-                        canvas(
-                            |_, _, _| (),
-                            move |bounds, _, _, _| {
-                                painted_bounds.set(bounds);
-                                painted_sessions.set(bounds.origin);
-                            },
-                        )
-                        .absolute()
-                        .inset_0()
-                        .size_full(),
-                    )
+                    .child(self.device_picker_probe(painted_bounds))
                     .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                        if this.open_menu(window, cx) {
-                            // Anchor to the control, not the pointer: every click
-                            // position leaves the same clear gap above the button.
-                            this.menu.anchor = button_bounds.get().origin;
-                            this.menu.page = Some(Page::Devices);
-                            this.menu.selected = Some(0);
-                        }
+                        this.open_device_picker(button_bounds.get().origin, window, cx);
                     })),
             )
             .when(!bar, |footer| {

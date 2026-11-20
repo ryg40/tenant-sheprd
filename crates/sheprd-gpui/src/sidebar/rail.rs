@@ -157,7 +157,7 @@ impl SheprdWindow {
         let slot = multi || silenced.values().any(Silenced::any_workspace);
         // A large sidebar font would make the columns wider than the rail and
         // clip the status icons, so the rail steps the font down until they fit.
-        let fitted = rail_font(&self.config.sidebar, indicators, multi, slot);
+        let fitted = rail_font(&self.config.sidebar_font(), indicators, multi, slot);
         let font = &fitted;
         let columns = rail_columns(font, indicators, multi, slot);
         let split = self.sidebar_split.unwrap_or(0.5).clamp(0.1, 0.9);
@@ -867,21 +867,23 @@ pub(super) fn describe(
     text.into()
 }
 
+/// A tooltip in the theme's colors, for the rail's marks and the sidebar's
+/// icon controls.
 #[derive(Clone, Copy)]
-struct Hint {
+pub(super) struct Hint {
     foreground: u32,
     surface: u32,
 }
 
 impl Hint {
-    fn new(theme: &Theme) -> Self {
+    pub(super) fn new(theme: &Theme) -> Self {
         Self {
             foreground: theme.foreground,
             surface: theme.surface,
         }
     }
 
-    fn with(
+    pub(super) fn with(
         self,
         text: impl Into<SharedString>,
     ) -> impl Fn(&mut Window, &mut App) -> AnyView + 'static {

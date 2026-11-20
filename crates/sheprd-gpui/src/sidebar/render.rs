@@ -3,7 +3,7 @@
 //! caches only.
 
 use super::{
-    DEVICE_FOOTER_HEIGHT, HOST_ARROW_WIDTH, STATUS_WIDTH, SidebarDrag,
+    HOST_ARROW_WIDTH, STATUS_WIDTH, SidebarDrag,
     agents::Indicators,
     agents::groups::agents_group,
     agents_sort,
@@ -19,12 +19,14 @@ use super::{
 use crate::direction::Logical;
 use crate::i18n::fl;
 use crate::{
-    Command, NavigationTarget, SheprdWindow, avatars::Checkout, config::AgentsPlacement,
+    NavigationTarget, SheprdWindow, avatars::Checkout, chrome_button, config::AgentsPlacement,
     fonts::StyledFont,
 };
 use gpui::{prelude::*, *};
 
 mod agent_rows;
+mod controls;
+mod desktop_footer;
 mod device_tree;
 mod edges;
 mod header;
@@ -44,13 +46,14 @@ impl SheprdWindow {
         let split = self.sidebar_split.unwrap_or(0.5).clamp(0.1, 0.9);
         let look = layout::for_config(&self.config, self.fill());
         let rows = layout_for(self.config.layout.mode);
+        let icons = self.config.layout.mode.desktop_chrome();
         // The row a workspace menu was opened for keeps looking hovered while
         // the pointer is over the menu.
         let menu_target = self.workspace_menu_target();
         let layout = look.density;
         let content_x = look.content_x();
         let view = cx.entity().downgrade();
-        let font = &self.config.sidebar;
+        let font = &*self.config.sidebar_font();
         let spaces_custom = self.config.usage.inline
             && self.config.sidebar_layout.spaces != crate::config::SpaceLayout::default();
         let theme = &self.theme;
@@ -783,7 +786,8 @@ impl SheprdWindow {
                                     ("spaces", fl!("sidebar-header-spaces"))
                                 };
                                 header(key, &label, font, theme, look)
-                            }),
+                            })
+                            .when(icons, |heading| self.with_heading_controls(heading, cx)),
                     )
                     .children(headed.then(|| self.tag_switch(cx)).flatten())
                     // The wrapper clips the pinned header as the next host's
@@ -803,48 +807,9 @@ impl SheprdWindow {
                                     .children(pinned_host.map(crate::mark_layer::covering)),
                             }),
                     )
-                    .child(
-                        div()
-                            .flex_none()
-                            .h(px(line_height(font) + 2. * layout.footer_padding()))
-                            .px(px(content_x))
-                            .row()
-                            .items_center()
-                            // Menu hugs the sidebar's edge, as in the terminal client.
-                            .justify_between()
-                            .text_color(rgb(theme.muted))
-                            .gap(px(20.))
-                            .child(
-                                div()
-                                    .id("new-workspace")
-                                    .map(|button| {
-                                        self.sidebar_button(button, fl!("sidebar-new-workspace"))
-                                    })
-                                    .cursor_pointer()
-                                    .hover(|s| s.text_color(rgb(theme.foreground)))
-                                    .child(fl!("sidebar-new"))
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.command(Command::Workspace, window, cx)
-                                    })),
-                            )
-                            .child(
-                                div()
-                                    .id("sidebar-menu")
-                                    .debug_selector(|| "sidebar-menu".into())
-                                    .map(|button| {
-                                        self.sidebar_button(button, fl!("sidebar-menu-label"))
-                                    })
-                                    .cursor_pointer()
-                                    .hover(|s| s.text_color(rgb(theme.foreground)))
-                                    .child(label_text(&fl!("sidebar-menu")))
-                                    .on_click(cx.listener(
-                                        |this, event: &ClickEvent, window, cx| {
-                                            this.menu.anchor = event.position();
-                                            this.open_menu(window, cx);
-                                        },
-                                    )),
-                            ),
-                    ),
+                    .when(!icons, |section| {
+                        section.child(self.sidebar_links(font, look, cx))
+                    }),
             )
             .when(agents_panel, |sidebar| {
                 sidebar.child(self.sidebar_split_edge(theme, cx)).child(
@@ -865,6 +830,7 @@ impl SheprdWindow {
                         .when(self.config.show_agents_header || filtered, |section| {
                             section.child(
                                 header("agents", &fl!("sidebar-header-agents"), font, theme, look)
+                                    .when(icons, |header| header.min_h(px(chrome_button::SIZE)))
                                     .justify_between()
                                     .child(
                                         div()
@@ -882,10 +848,12 @@ impl SheprdWindow {
             })
             .children(self.render_mod_sidebar_sections(cx))
             .map(|sidebar| {
-                if self.device_footer_shown() {
-                    sidebar.child(self.render_device_footer(cx))
-                } else {
+                if !self.device_footer_shown() {
                     sidebar.child(self.render_sessions_anchor())
+                } else if icons {
+                    sidebar.child(self.render_desktop_footer(cx))
+                } else {
+                    sidebar.child(self.render_device_footer(cx))
                 }
             })
             .child(self.sidebar_width_edge(width, cx))
@@ -936,11 +904,7 @@ impl SheprdWindow {
                                                 ));
                                             }
                                             SidebarDrag::Split => {
-                                                let footer = if this.device_footer_shown() {
-                                                    DEVICE_FOOTER_HEIGHT
-                                                } else {
-                                                    0.
-                                                };
+                                                let footer = this.device_footer_height();
                                                 let height =
                                                     (f32::from(bounds.size.height) - 6. - footer)
                                                         .max(1.);

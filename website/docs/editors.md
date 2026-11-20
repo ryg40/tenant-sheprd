@@ -60,7 +60,7 @@ Click a folder to open or close it. Click a file to open it in the view that fit
 | Enter | Open the file, or open or close the folder |
 | Escape | Clear the search, then return to the terminal |
 
-The tree is read when the panel opens and when you press the refresh button; it does not watch the disk. A folder that is gone from the disk closes on refresh. The button beside the search field closes every folder. Drag the panel's left edge to resize it.
+The row above the tree names the folder it lists; hover it for the whole path. The tree is read when the panel opens and when you press the refresh button; it does not watch the disk. A folder that is gone from the disk closes on refresh. The button beside the search field closes every folder. When the focus moves to a pane in another checkout, the tree shows that checkout; the folders you opened in the first one open again when the focus comes back to it. The tree keeps them for the last 16 checkouts, until Sheprd quits. Drag the panel's left edge to resize it; the width is kept when Sheprd restarts.
 
 The terminals always keep 240 pixels of width. When the window is too narrow for that, the mod panel (the column of mod sections) yields first: it narrows, then steps aside. Only then does the file explorer narrow, and step aside in turn. Both come back when the window is wide enough.
 
@@ -85,9 +85,9 @@ The tree marks the file that the active tab shows, whether the tab shows its pag
 
 - Files Git ignores are listed, dimmed. `.git` is never listed.
 - A symbolic link is listed and never followed, so nothing outside the checkout is read.
-- A folder lists its first 2,000 entries by name, of the first 8,000 it reads, and says when it holds more. At most 256 folders are open at once, and a refresh reads four folders at a time.
+- A folder lists its first 2,000 entries by name, of the first 8,000 it reads, and a row under them says how many more it holds: "at least" that many when it holds more than 8,000. At most 256 folders are open at once, and a refresh reads four folders at a time.
 - A name with a colon or a backslash is listed and opens on macOS and Linux. On Windows, where they separate names and drives, such a path is refused.
-- A name with a control character or a text direction override, or longer than 255 bytes, is not listed; the folder says it holds more.
+- A name with a control character or a text direction override, or longer than 255 bytes, is not listed; the folder counts it among the entries not listed.
 - Each folder on the way to a file is checked to be a real folder before it is read. A program that swaps a folder for a link between the check and the read can make a listing show names from outside the checkout; it needs write access to the checkout to do so.
 - On Windows, `sheprd files reveal` and the mark on the active tab's file may not find a path, because the resolved path and Git's path are written differently. Windows and macOS are not verified yet.
 - Only local checkouts are listed. A workspace on an SSH or cloud host shows "Files are not available for a remote host yet."

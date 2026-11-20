@@ -38,6 +38,14 @@ mod annotate_command;
 #[cfg(servo_pages)]
 mod blank;
 
+/// A tab whose page stopped, and its reload. Only Servo reports it.
+#[cfg(servo_pages)]
+mod stopped;
+
+/// The page of a tab a restored layout shows. The fix is Servo's.
+#[cfg(servo_pages)]
+mod restored;
+
 /// Needs a build that shows pages: elsewhere a new tab opens nothing.
 #[cfg(embedded_pages)]
 mod embedded;

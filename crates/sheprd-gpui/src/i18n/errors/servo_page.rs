@@ -23,6 +23,7 @@ impl Localize for Error {
             Self::Address => fl!("error-servo-page-address"),
             Self::Busy => fl!("error-servo-page-busy"),
             Self::Profile(error) => error.localize(),
+            Self::ScriptEnded => fl!("error-servo-page-script-ended"),
             Self::Stopped => fl!("error-servo-page-stopped"),
             Self::Surface(error) => fl!("error-servo-page-surface", error = error.as_str()),
             Self::Thread(error) => fl!("error-servo-page-thread", error = error.to_string()),

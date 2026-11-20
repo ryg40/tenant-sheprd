@@ -3,13 +3,13 @@
 //! variant without a type per combination.
 
 use super::{
-    CHILD_INDENT, HOST_GAP, LABEL_GAP, ROW_PADDING, STATUS_WIDTH, cell::RowState, row::RowLift,
-    wash::HostMark,
+    CHILD_INDENT, HOST_GAP, LABEL_GAP, ROW_PADDING, STATUS_WIDTH, cell::RowState, glyph_width,
+    row::RowLift, wash::HostMark,
 };
 use crate::direction::Logical;
 use crate::{
     backdrop::Fill,
-    config::{Density, LayoutMode, SidebarOverrides, Style, Theme},
+    config::{Density, FontConfig, LayoutMode, SidebarOverrides, Style, Theme},
 };
 use gpui::{
     Div, Hsla, InteractiveElement, ParentElement, Rgba, Styled, div, prelude::FluentBuilder, px,
@@ -56,6 +56,12 @@ pub(crate) struct SidebarMetrics {
     /// draw them; every other layout draws them for `[worktrees]`.
     pub(crate) tree_lines: bool,
     pub(crate) header_case: HeaderCase,
+    /// What the label budgets assume of the face the text draws in.
+    pub(crate) face: Face,
+    /// How a row that folds marks whether it is open.
+    pub(crate) fold: FoldMark,
+    /// How many pixels smaller than its first line a row's later lines draw.
+    pub(crate) detail_step: f32,
 }
 
 impl SidebarMetrics {
@@ -66,13 +72,17 @@ impl SidebarMetrics {
             Density::Normal => Self::normal(),
             Density::Compact => Self::compact(),
         };
-        let metrics = match mode.style() {
-            Style::Flat => density,
-            Style::Rounded => density.rounded(),
+        let metrics = match (mode, mode.style()) {
+            (LayoutMode::Desktop, _) => Self::desktop(),
+            (_, Style::Flat) => density,
+            (_, Style::Rounded) => density.rounded(),
         };
         // Superset and Minimal share a flat density but are their own
         // designs, which have no tree of their own.
-        let own_rows = matches!(mode, LayoutMode::Classic { .. } | LayoutMode::Devices);
+        let own_rows = matches!(
+            mode,
+            LayoutMode::Classic { .. } | LayoutMode::Devices | LayoutMode::Desktop
+        );
         Self {
             tree_lines: metrics.tree_lines && own_rows,
             ..metrics
@@ -173,6 +183,9 @@ impl SidebarMetrics {
         highlight: Highlight::Fill,
         tree_lines: true,
         header_case: HeaderCase::Lower,
+        face: Face::Monospace,
+        fold: FoldMark::Glyph,
+        detail_step: 0.,
     };
 
     /// Inset rows with rounded, outlined highlights. Worktrees keep their
@@ -192,6 +205,37 @@ impl SidebarMetrics {
             header_case: HeaderCase::Title,
             ..self
         }
+    }
+
+    /// A desktop app's sidebar in the proportional `[ui]` face: comfortable
+    /// rounded rows filled rather than outlined under the pointer and focus,
+    /// about 30 px tall at 13 px, later lines a pixel smaller, and chevrons
+    /// on the rows that fold. Its headings end in icon buttons and its
+    /// footer is rows of an icon and a label, and the window draws pill
+    /// tabs beside it ([`crate::config::LayoutMode::desktop_chrome`]).
+    fn desktop() -> Self {
+        Self {
+            row_padding: 3.,
+            highlight: Highlight::Fill,
+            face: Face::Proportional,
+            fold: FoldMark::Chevron,
+            detail_step: 1.,
+            ..Self::comfortable().rounded()
+        }
+    }
+
+    /// The width each glyph of a fixed text, such as a pull request number,
+    /// change or upstream counts, or a status word, reserves at `font`.
+    pub(super) fn glyph(&self, font: &FontConfig) -> f32 {
+        match self.face {
+            Face::Monospace => glyph_width(font),
+            Face::Proportional => font.size * PROPORTIONAL_GLYPH,
+        }
+    }
+
+    /// The text size of a row's lines after its first, at `font`.
+    pub(super) fn detail_size(&self, font: &FontConfig) -> f32 {
+        font.size - self.detail_step
     }
 
     /// The preset with every key the config file set written over it. The
@@ -254,6 +298,35 @@ pub(crate) enum Highlight {
     /// A faint foreground wash inside a brighter border, so the border carries
     /// the selection while the label stays legible.
     Outline,
+}
+
+/// What a layout's label budgets assume of the face its text draws in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Face {
+    /// Every glyph advances alike, so a line's segments get cells sized by
+    /// glyph count at fixed offsets, and a glyph count bounds a number.
+    Monospace,
+    /// Glyphs differ in width, so a line's segments sit side by side and
+    /// GPUI shrinks and truncates them at their real widths, and a fixed
+    /// text reserves [`PROPORTIONAL_GLYPH`] per glyph. Safe for a monospace
+    /// face too, such as a `[sidebar] family` the user sets: it only
+    /// reserves a little more.
+    Proportional,
+}
+
+/// The widest a glyph of a short fixed text averages in a common UI face,
+/// as a fraction of its size. DejaVu Sans, Linux's default, draws `#`,
+/// `+`, and the upstream arrows at 0.84 em and digits at 0.64 em, so `#7`
+/// and `↓1` average 0.74 em; letters average well under it.
+const PROPORTIONAL_GLYPH: f32 = 0.74;
+
+/// How a row that folds marks whether it is open.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FoldMark {
+    /// A text triangle in the row's font, as Herdr's terminal client draws.
+    Glyph,
+    /// A chevron icon, right while folded and down while open.
+    Chevron,
 }
 
 /// How section headings spell their label.

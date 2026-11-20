@@ -123,8 +123,22 @@ pub(super) fn reload(caller: &Caller, cx: &mut App) -> Response {
         .try_global::<crate::browser::Store>()
         .map(|store| store.opened_by(pane).map(|tab| tab.id).collect())
         .unwrap_or_default();
+    let mut refused = 0;
     for handle in main_windows(cx) {
-        let _ = handle.update(cx, |view, _, _| view.reload_browser_tabs(&tabs));
+        if let Ok(count) = handle.update(cx, |view, window, cx| {
+            view.reload_browser_tabs(&tabs, window, cx)
+        }) {
+            refused += count;
+        }
+    }
+    if refused > 0 {
+        let reloaded = tabs.len().saturating_sub(refused);
+        return Response::error(
+            ErrorCode::Failed,
+            format!(
+                "Reloaded {reloaded} browser tab(s); {refused} stopped page(s) could not open again"
+            ),
+        );
     }
     Response::Reloaded { tabs: tabs.len() }
 }

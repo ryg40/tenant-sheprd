@@ -68,10 +68,13 @@ mod preview;
 mod px0;
 #[cfg(embedded_pages)]
 mod reports;
+#[cfg(embedded_pages)]
+mod shown_pages;
 #[cfg(target_os = "macos")]
 mod snapshot;
 #[cfg(target_os = "macos")]
 mod stacking;
+mod stopped;
 mod store;
 mod tab_appear;
 pub(crate) mod tab_body;

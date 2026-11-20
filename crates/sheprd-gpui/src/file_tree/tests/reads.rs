@@ -10,7 +10,7 @@ fn listing(name: &str) -> Listing {
             kind: Kind::File,
             ignored: false,
         }],
-        more: false,
+        omitted: Default::default(),
     }
 }
 

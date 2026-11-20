@@ -1,19 +1,26 @@
 use super::*;
-use crate::local_ports::process::{Found, act, act_with, check, user};
+use crate::local_ports::{
+    birth,
+    process::{Found, Tie, act, act_with, check, user},
+};
 use std::cell::RefCell;
 use std::{os::unix::process::ExitStatusExt, process::Child, time::Duration};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessStatus, ProcessesToUpdate, Signal, System};
 
-const VICTIM: Identity = Identity {
-    pid: 4242,
-    started: 1_700_000_000,
+const STARTED: u64 = 1_700_000_000;
+const VICTIM: Victim = Victim {
+    identity: Identity {
+        pid: 4242,
+        started: STARTED,
+    },
+    birth: Some(Birth(STARTED)),
 };
 
 /// [`act`] on one process.
 fn one(
     system: &mut System,
     action: PortAction,
-    victim: Identity,
+    victim: Victim,
     user: u32,
     grace: Duration,
 ) -> Outcome {
@@ -22,7 +29,8 @@ fn one(
 
 fn found(started: u64, user: Option<u32>) -> Option<Found> {
     Some(Found {
-        started,
+        birth: Some(Birth(started)),
+        tie: Tie::Held,
         user,
         zombie: false,
     })
@@ -30,20 +38,19 @@ fn found(started: u64, user: Option<u32>) -> Option<Found> {
 
 #[test]
 fn a_signal_goes_only_to_the_process_listed() {
-    assert_eq!(check(found(VICTIM.started, Some(501)), VICTIM, 501), Ok(()));
-    // The OS would not name the owner: the start time still decides.
-    assert_eq!(check(found(VICTIM.started, None), VICTIM, 501), Ok(()));
+    assert_eq!(check(found(STARTED, Some(501)), VICTIM, 501), Ok(()));
 }
 
 #[test]
 fn a_reused_pid_or_an_exited_process_is_refused() {
     assert_eq!(
-        check(found(VICTIM.started + 1, Some(501)), VICTIM, 501),
+        check(found(STARTED + 1, Some(501)), VICTIM, 501),
         Err(Outcome::Exited)
     );
     assert_eq!(check(None, VICTIM, 501), Err(Outcome::Exited));
     let zombie = Some(Found {
-        started: VICTIM.started,
+        birth: VICTIM.birth,
+        tie: Tie::Held,
         user: Some(501),
         zombie: true,
     });
@@ -53,7 +60,7 @@ fn a_reused_pid_or_an_exited_process_is_refused() {
 #[test]
 fn another_users_process_is_refused() {
     assert_eq!(
-        check(found(VICTIM.started, Some(0)), VICTIM, 501),
+        check(found(STARTED, Some(0)), VICTIM, 501),
         Err(Outcome::Foreign)
     );
 }
@@ -65,16 +72,20 @@ fn spawn(script: &str) -> Child {
         .unwrap()
 }
 
-fn identity(system: &mut System, child: &Child) -> Identity {
+fn identity(system: &mut System, child: &Child) -> Victim {
     let pid = Pid::from_u32(child.id());
     system.refresh_processes_specifics(
         ProcessesToUpdate::Some(&[pid]),
         true,
         ProcessRefreshKind::nothing(),
     );
-    Identity {
-        pid: child.id(),
-        started: system.process(pid).unwrap().start_time(),
+    let started = system.process(pid).unwrap().start_time();
+    Victim {
+        identity: Identity {
+            pid: child.id(),
+            started,
+        },
+        birth: birth::now(child.id(), started),
     }
 }
 
@@ -168,7 +179,7 @@ fn a_stale_start_time_is_never_signalled() {
     let mut system = System::new();
     let mut child = spawn("exec sleep 30");
     let mut victim = identity(&mut system, &child);
-    victim.started -= 1;
+    victim.birth = victim.birth.map(|Birth(start)| Birth(start - 1));
     assert_eq!(
         one(
             &mut system,
@@ -207,19 +218,14 @@ fn scripted_stop(seen: &[Option<Found>], grace: Duration) -> (Outcome, Vec<Signa
 
 #[test]
 fn a_pid_reused_after_sigterm_is_never_resumed_or_killed() {
-    let reused = found(VICTIM.started + 5, Some(501));
-    let (outcome, sent) = scripted_stop(
-        &[found(VICTIM.started, Some(501)), reused],
-        Duration::from_secs(1),
-    );
+    let reused = found(STARTED + 5, Some(501));
+    let (outcome, sent) =
+        scripted_stop(&[found(STARTED, Some(501)), reused], Duration::from_secs(1));
     assert_eq!(outcome, Outcome::Signalled);
     assert_eq!(sent, [Signal::Term]);
     // Another user's process now on the pid is left alone too.
     let (_, sent) = scripted_stop(
-        &[
-            found(VICTIM.started, Some(501)),
-            found(VICTIM.started, Some(0)),
-        ],
+        &[found(STARTED, Some(501)), found(STARTED, Some(0))],
         Duration::from_secs(1),
     );
     assert_eq!(sent, [Signal::Term]);
@@ -227,24 +233,18 @@ fn a_pid_reused_after_sigterm_is_never_resumed_or_killed() {
 
 #[test]
 fn a_process_that_exits_on_sigterm_gets_nothing_more() {
-    let (outcome, sent) = scripted_stop(
-        &[found(VICTIM.started, Some(501)), None],
-        Duration::from_secs(1),
-    );
+    let (outcome, sent) = scripted_stop(&[found(STARTED, Some(501)), None], Duration::from_secs(1));
     assert_eq!(outcome, Outcome::Signalled);
     assert_eq!(sent, [Signal::Term]);
 }
 
 #[test]
 fn a_process_still_running_is_resumed_then_killed_after_its_grace() {
-    let (outcome, sent) = scripted_stop(
-        &[found(VICTIM.started, Some(501))],
-        Duration::from_millis(300),
-    );
+    let (outcome, sent) = scripted_stop(&[found(STARTED, Some(501))], Duration::from_millis(300));
     assert_eq!(outcome, Outcome::Killed);
     assert_eq!(sent, [Signal::Term, Signal::Continue, Signal::Kill]);
     // It exits while it has time: no SIGKILL.
-    let running = found(VICTIM.started, Some(501));
+    let running = found(STARTED, Some(501));
     let (outcome, sent) = scripted_stop(&[running, running, running, None], Duration::from_secs(1));
     assert_eq!(outcome, Outcome::Signalled);
     assert_eq!(sent, [Signal::Term, Signal::Continue]);

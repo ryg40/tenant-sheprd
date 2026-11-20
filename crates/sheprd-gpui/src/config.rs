@@ -44,6 +44,7 @@ mod padding;
 pub(crate) mod preferences;
 pub(crate) use sheprd_remote_control::app::config as remote;
 pub(crate) mod sidebar;
+mod sidebar_font;
 mod sidebar_style;
 mod sprites;
 pub(crate) mod ssh_hosts;
@@ -62,6 +63,7 @@ pub(crate) mod tab_layout;
     feature = "sprites"
 ))]
 mod table;
+mod tabs_font;
 pub(crate) use sidebar_style::parse_hex;
 mod theme;
 mod updates;
@@ -303,6 +305,9 @@ pub struct Config {
     /// When true the window needs no title bar from the window manager.
     pub show_window_controls: bool,
     pub sidebar: FontConfig,
+    /// The `[sidebar]` font keys the user's own file sets, which a layout
+    /// drawing in the `[ui]` face still yields to.
+    pub sidebar_font_keys: sidebar_font::FontKeys,
     /// Daemon sidebar rows, falling back to defaults when invalid.
     pub sidebar_layout: SidebarLayout,
     /// Spacing overrides, host colours, and selection marking for the sidebar.
@@ -319,6 +324,9 @@ pub struct Config {
     pub status_bar: StatusBar,
     /// The set agent status is drawn with.
     pub status_icons: StatusIcons,
+    /// The `[tabs]` font keys and `tab_layout` as the user chose them, which
+    /// the desktop layout's own tabs still yield to.
+    pub tab_keys: tabs_font::TabKeys,
     /// What a tab with no name of its own is called.
     pub tab_labels: TabLabels,
     /// How tab strips draw their tabs, from View > Tab Layout.
@@ -450,6 +458,7 @@ impl Default for Config {
             show_system_load: true,
             show_window_controls: cfg!(target_os = "linux"),
             sidebar: font(monospace, 12.0),
+            sidebar_font_keys: sidebar_font::FontKeys::default(),
             sidebar_layout: SidebarLayout::default(),
             sidebar_style: SidebarStyle::default(),
             smooth_scroll: true,
@@ -458,6 +467,7 @@ impl Default for Config {
             ssh: SshConfig::default(),
             status_bar: StatusBar::default(),
             status_icons: StatusIcons::default(),
+            tab_keys: tabs_font::TabKeys::default(),
             tab_labels: TabLabels::default(),
             tab_layout: TabLayoutMode::default(),
             // Tabs are terminal chrome, so they read in the monospace face the
@@ -766,7 +776,8 @@ impl Config {
     }
 
     fn parse_layers<'a>(texts: impl IntoIterator<Item = &'a str>, base: &Daemon) -> Result<Self> {
-        let value = Self::merged(texts)?;
+        let texts: Vec<&str> = texts.into_iter().collect();
+        let value = Self::merged(texts.iter().copied())?;
         let mut unknown_keys = Vec::new();
         let mut settings: Settings = serde_ignored::deserialize(value, |path| {
             unknown_keys.push(path.to_string());
@@ -893,6 +904,8 @@ impl Config {
         config.layout = settings.layout;
         config.language = settings.language.unwrap_or_default();
         config.sidebar_style = settings.sidebar.style()?;
+        // The last layer is the user's own file, over the managed defaults.
+        config.sidebar_font_keys = sidebar_font::FontKeys::set_in(texts.last().copied());
         config.keybindings =
             Keymap::with_overrides(&settings.keybindings, &settings.pane_keys, &base.keys)?;
         config.keybinding_overrides = settings.keybindings;
@@ -940,6 +953,7 @@ impl Config {
         config.status_bar = settings.status_bar;
         config.tab_labels = settings.tab_labels;
         config.tab_layout = settings.tab_layout;
+        config.tab_keys = tabs_font::TabKeys::set_in(texts.last().copied());
         settings.ssh.check()?;
         config.ssh = settings.ssh;
         let (status_icons, legacy_rail) = status_icons::SavedIcons::resolve(settings.status_icons);

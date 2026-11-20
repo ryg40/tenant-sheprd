@@ -6,6 +6,7 @@ use super::super::{
     ARROW_RESERVE,
     agents::agent_labels,
     cell::{AgentRow, RowContext, RowLayout, RowState, WorkspaceRow},
+    layout::FoldMark,
     line_height,
     row::{RowIcon, RowKind, RowTree},
     scaled,
@@ -36,10 +37,18 @@ impl RowLayout for Herdr {
             ..
         } = row;
         let arrow = fold.map(|fold| {
-            fold.element(cx.theme)
+            let target = match density.fold {
+                FoldMark::Glyph => fold.element(cx.theme).text_size(px(scaled(cx.font, 16.))),
+                FoldMark::Chevron => {
+                    let size = scaled(cx.font, super::CHEVRON);
+                    // Centered on the first line, where a triangle sits.
+                    fold.chevron(size, cx.theme)
+                        .pt(px(((line_height(cx.font) - size) / 2.).max(0.)))
+                }
+            };
+            target
                 .w(px(scaled(cx.font, ARROW_RESERVE) - density.gap()))
                 .h(px(line_height(cx.font) * text_lines as f32))
-                .text_size(px(scaled(cx.font, 16.)))
         });
         super::super::row::row(
             label,

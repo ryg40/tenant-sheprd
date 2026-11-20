@@ -125,7 +125,7 @@ impl SheprdWindow {
             background,
             text,
             border: self.theme.active,
-            font: self.config.tabs.clone(),
+            font: self.config.tabs_font().into_owned(),
             hint_size: self.config.ui.size * 0.85,
             outside: ghost.outside,
         })

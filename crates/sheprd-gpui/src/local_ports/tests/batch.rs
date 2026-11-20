@@ -1,7 +1,7 @@
 //! Stopping several processes at once, against a scripted OS.
 
 use super::*;
-use crate::local_ports::process::{Found, act_with};
+use crate::local_ports::process::{Found, Tie, act_with};
 use std::cell::RefCell;
 use sysinfo::Signal;
 
@@ -13,10 +13,22 @@ fn identity(pid: u32) -> Identity {
 
 fn alive(victim: Identity) -> Option<Found> {
     Some(Found {
-        started: victim.started,
+        birth: Some(Birth(victim.started)),
+        tie: Tie::Held,
         user: Some(USER),
         zombie: false,
     })
+}
+
+/// `victims` as rows listed them, each with the start [`alive`] reads.
+fn listed(victims: &[Identity]) -> Vec<Victim> {
+    victims
+        .iter()
+        .map(|&identity| Victim {
+            identity,
+            birth: Some(Birth(identity.started)),
+        })
+        .collect()
 }
 
 #[derive(Debug, PartialEq)]
@@ -36,7 +48,7 @@ fn stop(
     let waits = RefCell::new(0);
     let outcomes = act_with(
         PortAction::Stop,
-        victims,
+        &listed(victims),
         USER,
         grace,
         |victim| {
@@ -146,7 +158,7 @@ fn pausing_a_batch_never_waits() {
     let sent = RefCell::new(Vec::new());
     let outcomes = act_with(
         PortAction::Pause,
-        &victims,
+        &listed(&victims),
         USER,
         Duration::from_secs(3),
         alive,

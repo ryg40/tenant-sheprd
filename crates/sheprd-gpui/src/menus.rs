@@ -14,7 +14,7 @@ use crate::{
         ShowToastPreview, ShowUpdateDownloadPreview, ShowUpdateHomebrewPreview, TogglePseudoLocale,
         ToggleSlowAnimations,
     },
-    config::{ChatLayoutMode, Config, LayoutMode, TabLayoutMode},
+    config::{ChatLayoutMode, Config, Density, LayoutMode, Style, TabLayoutMode},
     controls::Command,
 };
 #[cfg(target_os = "macos")]
@@ -51,16 +51,21 @@ pub(crate) fn install(cx: &mut App) {
 /// with a design of their own, then Devices, which lists agents by device;
 /// the one in use checked.
 fn layout_menu(current: LayoutMode) -> MenuItem {
-    let items = LayoutMode::ALL
-        .iter()
-        .enumerate()
-        .flat_map(|(index, &mode)| {
-            let group = matches!(index, 3 | 6 | 9).then(MenuItem::separator);
-            group.into_iter().chain([
-                MenuItem::action(mode.label(), SetLayout { mode }).checked(mode == current)
-            ])
-        });
+    let items = LayoutMode::ALL.iter().flat_map(|&mode| {
+        let group = leads_layout_group(mode).then(MenuItem::separator);
+        group
+            .into_iter()
+            .chain([MenuItem::action(mode.label(), SetLayout { mode }).checked(mode == current)])
+    });
     MenuItem::submenu(Menu::new(fl!("menus-layout")).items(items))
+}
+
+/// Whether a separator comes before `mode` in View > Layout: it leads the
+/// rounded densities, the layouts with a design of their own, or Devices.
+/// Named rather than counted, so a new layout joins its group.
+fn leads_layout_group(mode: LayoutMode) -> bool {
+    mode == LayoutMode::new(Density::Normal, Style::Rounded)
+        || matches!(mode, LayoutMode::Superset | LayoutMode::Devices)
 }
 
 /// View > Tab Layout: how tab strips draw their tabs, the one in use checked.
@@ -83,7 +88,7 @@ fn chat_layout_menu(current: ChatLayoutMode) -> MenuItem {
 /// `old`, so a config reload knows to install it again.
 pub(crate) fn changed(old: &Config, new: &Config) -> bool {
     old.layout.mode != new.layout.mode
-        || old.tab_layout != new.tab_layout
+        || old.tab_layout_in_use() != new.tab_layout_in_use()
         || old.chat.layout != new.chat.layout
         || old.features.qa_menu != new.features.qa_menu
 }
@@ -236,7 +241,7 @@ pub(crate) fn menus(config: &Config) -> Vec<Menu> {
                 ),
                 MenuItem::separator(),
                 layout_menu(config.layout.mode),
-                tab_layout_menu(config.tab_layout),
+                tab_layout_menu(config.tab_layout_in_use()),
                 chat_layout_menu(config.chat.layout),
                 MenuItem::action(
                     fl!("menus-devices-overview"),

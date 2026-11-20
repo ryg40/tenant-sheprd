@@ -102,7 +102,9 @@ impl SheprdWindow {
                             .collect()
                     })
                     .unwrap_or_default();
-                self.reload_browser_tabs(&tabs);
+                // A refusal shows as the tab's failure line; the host
+                // gets no answer.
+                self.reload_browser_tabs(&tabs, window, cx);
                 return;
             }
             Action::Open { address, focus } => (address, focus),

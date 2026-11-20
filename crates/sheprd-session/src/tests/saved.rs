@@ -57,3 +57,14 @@ fn saved_tabs_are_bounded() {
     assert!(matches!(SavedTabs::parse(&many), Err(Error::Many)));
     assert!(matches!(SavedTabs::parse(b"{"), Err(Error::Format(_))));
 }
+
+#[test]
+fn a_tab_saved_without_a_title_is_listed_with_none() {
+    let saved = parse(json!([
+        {"id": 1, "scope": "s", "workspace_id": "w",
+         "location": {"kind": "core_terminal", "panes": "t1"}},
+        tab(2, json!({"kind": "core_terminal", "panes": "t2"})),
+    ]));
+    let titles: Vec<&str> = saved.core_tabs("s").map(|tab| tab.title).collect();
+    assert_eq!(titles, ["", "t"]);
+}

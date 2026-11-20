@@ -14,20 +14,25 @@ pub(super) fn window<'a>(
     cx: &'a mut TestAppContext,
     cwd: &Path,
 ) -> (Entity<SheprdWindow>, &'a mut VisualTestContext) {
-    let cwd = cwd.to_str().unwrap().to_owned();
+    let cwd = cwd.to_owned();
     cx.add_window_view(move |window, cx| {
         let mut view = crate::sidebar::layout_tests::fixture_window(window, cx);
-        let mut shown = serde_json::to_value(crate::sidebar::layout_tests::snapshot(1)).unwrap();
-        shown["focused_workspace_id"] = "w0".into();
-        shown["focused_pane_id"] = "p0".into();
-        shown["panes"] = serde_json::json!([{
-            "pane_id": "p0", "workspace_id": "w0", "tab_id": "t0",
-            "label": "shell", "cwd": cwd, "foreground_cwd": null,
-            "focused": true, "right_click_passthrough": false
-        }]);
-        view.live.snapshot = Some(Arc::new(serde_json::from_value(shown).unwrap()));
+        focus_folder(&mut view, &cwd);
         view
     })
+}
+
+/// Makes the focused pane one that works in `cwd`.
+pub(super) fn focus_folder(view: &mut SheprdWindow, cwd: &Path) {
+    let mut shown = serde_json::to_value(crate::sidebar::layout_tests::snapshot(1)).unwrap();
+    shown["focused_workspace_id"] = "w0".into();
+    shown["focused_pane_id"] = "p0".into();
+    shown["panes"] = serde_json::json!([{
+        "pane_id": "p0", "workspace_id": "w0", "tab_id": "t0",
+        "label": "shell", "cwd": cwd.to_str().unwrap(), "foreground_cwd": null,
+        "focused": true, "right_click_passthrough": false
+    }]);
+    view.live.snapshot = Some(Arc::new(serde_json::from_value(shown).unwrap()));
 }
 
 pub(super) fn toggle(view: &Entity<SheprdWindow>, cx: &mut VisualTestContext) {

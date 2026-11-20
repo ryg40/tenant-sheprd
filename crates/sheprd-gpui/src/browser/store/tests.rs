@@ -6,6 +6,7 @@ mod editors;
 mod orchestrator_tabs;
 mod px0;
 mod reserved_ids;
+mod restored_title;
 #[cfg(servo_pages)]
 mod untitled;
 

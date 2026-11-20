@@ -68,7 +68,8 @@ pub(super) fn glyph_width(font: &FontConfig) -> f32 {
 
 /// Widths in glyphs for segments sharing one line, as upstream shares them:
 /// every segment keeps one glyph, then they grow in turn until the line is
-/// full, so a long name cannot crowd a short one out entirely.
+/// full, so a long name cannot crowd a short one out entirely. Any whole unit
+/// divides the same way; [`segment_widths`] divides pixels.
 pub(super) fn segment_budgets(lengths: &[usize], available: usize) -> Vec<usize> {
     let mut budgets: Vec<usize> = lengths
         .iter()
@@ -92,4 +93,19 @@ pub(super) fn segment_budgets(lengths: &[usize], available: usize) -> Vec<usize>
         }
     }
     budgets
+}
+
+/// Widths in pixels for segments of `natural` widths sharing `available`
+/// pixels of a proportional line, by [`segment_budgets`]' rule: a segment
+/// that fits keeps its whole width, rounded up to the pixel GPUI's text
+/// layout rounds it to, and only the ones that do not fit share the rest.
+pub(super) fn segment_widths(natural: &[f32], available: f32) -> Vec<f32> {
+    let lengths: Vec<usize> = natural
+        .iter()
+        .map(|width| width.max(0.).ceil() as usize)
+        .collect();
+    segment_budgets(&lengths, available.max(0.).floor() as usize)
+        .into_iter()
+        .map(|budget| budget as f32)
+        .collect()
 }

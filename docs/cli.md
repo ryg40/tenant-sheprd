@@ -336,20 +336,45 @@ and `off` exit 8.
 
 A click with the program reads `artifacts --json status` in the background,
 and the button pulses meanwhile. A server that answers (`running` or
-`remote`) opens its page. A stopped local server opens Sheprd's question
-"Start the artifact server?" with the page address and the program file that
-runs; only **Start** runs `artifacts start`, then that same page opens. Any
-other state, or a failed run, shows a short reason. Without the program, a
-click opens `url` as before.
+`remote`) opens its page. A stopped local server starts at once: the click
+runs `artifacts start` without a question, the button pulses until it ends,
+and then that same page opens. A local server that runs but does not answer
+(`unreachable` at a loopback page) restarts at once: the click runs
+`artifacts off`, then that start. Where the page opens as a tab (macOS,
+Windows, and Linux builds with `servo`), nothing starts or stops until a
+workspace is focused to hold it. Any other state, or a failed run, shows a
+short reason. Without the program, a click opens `url` as before.
+
+Before a start, Sheprd takes the page's port back, as the program refuses to
+start while any program listens on it. It checks the port on IPv4 loopback in
+the background, as the program does. A port forward or tunnel that a Sheprd
+window holds on it stops at once. Otherwise Sheprd reads this computer's port
+list (the one of `sheprd ports all`), and every process there whose listener
+on that port would make a bind of `127.0.0.1` fail (one on `127.0.0.1` or on
+every IPv4 address, bound to any network device or none) gets the question of
+`sheprd ports stop PORT`, also an SSH forward that looks like one of
+Sheprd's: a command line does not prove who made a process. After its yes,
+the processes stop and the server starts once the stop has finished; after
+Cancel, nothing changes. A stop that does not finish starts nothing. When the
+list shows nothing that can hold the port, Sheprd checks the port once more:
+a free port goes on to the start, and a taken one flashes that Sheprd could
+not identify what listens. A port list that cannot be read also flashes a
+reason that names the port. After each wait, nothing starts, stops, or asks
+unless the program file is the same and the window can still show the page.
+Only the port of the program's own loopback page is freed, never a port on
+another machine or one that a page or an agent names.
 
 The setting wins. The program decides the click only when `[artifacts] url`
 is unset, or when the setting and the program's page have the same origin
-(scheme, host, and port); the setting's page is then the one asked about and
-opened. Otherwise, and when the program is not set up, does not answer, or
-fails, a click opens the setting as before (a failure also flashes its
-reason). A loopback address such as `http://127.0.0.1:6790/browse` names the computer
-where Sheprd runs. Sheprd starts the server only after a yes, never by itself,
-and leaves it running when it quits.
+(scheme, host, and port); the setting's page is then the one that opens, also
+after a start; when its loopback server does not answer, the click
+restarts it as above. Otherwise, and when the program is not set up, reports
+a server that does not answer on another machine, or fails, a click opens
+the setting as before (a failure also flashes its reason). A loopback
+address such as `http://127.0.0.1:6790/browse` names the computer where
+Sheprd runs. A click on the button starts the server; a command
+(`sheprd artifacts start`) asks first. Sheprd never starts it without a
+click or a yes to that question, and leaves it running when it quits.
 
 `sheprd config set artifacts.url https://example.com/` sets the page;
 `config unset artifacts.url` removes it.
@@ -357,8 +382,8 @@ and leaves it running when it quits.
 | Command | What it does |
 | --- | --- |
 | `artifacts [status]` | The state (`running`, `stopped`, `remote`, `unreachable`, or `unconfigured`) and the page of the server it describes: the program's page, or `[artifacts] url` when the program names none. When the button opens another page (`[artifacts] url` set to it), the answer names that page too (`--json`: `opens`). Exits 8 when the program is not installed, and always on Windows, where Sheprd does not look for it |
-| `artifacts open` | Open the page in the window when the server answers, as the button does. Starts nothing; exits 1 when the server is stopped |
-| `artifacts start` | Open Sheprd's question to start the local server whenever the program reports it `stopped`, also when `[artifacts] url` names another server; the user confirms there and the page of the started server then opens (the setting's page when it names that server). Answers at once, as `ports prune` does; exits 6 while a dialog is open |
+| `artifacts open` | Open the page in the window when the server answers, as the button does. Starts nothing; exits 1 when the server is stopped or does not answer |
+| `artifacts start` | Open Sheprd's question to start the local server whenever the program reports it `stopped`, or to restart it (`off`, then `start`) when it reports a loopback page `unreachable`, also when `[artifacts] url` names another server; the user confirms there, the port is taken back as for a click, and the page of the started server then opens (the setting's page when it names that server). Answers at once, as `ports prune` does; exits 6 while a dialog is open |
 | `artifacts off` | Open Sheprd's question to stop the local server (`artifacts off`); the user confirms there. Answers at once; exits 6 while a dialog is open |
 
 Each waits at most 20 seconds for the program's status. Only one run of the
@@ -380,11 +405,14 @@ nothing for longer than its bound.
 | Run | Bound | What Sheprd expects |
 | --- | --- | --- |
 | `artifacts --json status` | 15 s | One JSON object: `state` is `running`, `stopped`, `remote`, `unreachable`, or `unconfigured`, and the optional `url` is the server's page, an `http` or `https` address. Other fields are ignored. An unknown state or a bad `url` is a failed run |
-| `artifacts start` | 90 s | Starts the local server. The last line that is not blank, when it is an `http` or `https` address, names the server that started. If it is not the server Sheprd asked about, Sheprd opens nothing and shows that address |
+| `artifacts start` | 90 s | Starts the local server. The last line that is not blank, when it is an `http` or `https` address, names the server that started. If it is not the server Sheprd meant to start, Sheprd opens nothing and shows that address |
 | `artifacts off` | 30 s | Stops each local server of this user, and exits 0 also when none ran |
 
-Sheprd runs `status` on a click and for each `sheprd artifacts` command, and runs
-`start` or `off` only after the user confirms in the window. Without the
+Sheprd runs `status` on a click and for each `sheprd artifacts` command. It
+runs `start` on a click that finds the server stopped, or after the user
+confirms `sheprd artifacts start` in the window. It runs `off` after the
+user confirms `sheprd artifacts off`, and before such a `start` when the
+status was `unreachable` at a loopback page. Without the
 program, the button shows only when `[artifacts] url` is set and opens that
 page, and `sheprd artifacts status`, `start`, and `off` exit 8.
 

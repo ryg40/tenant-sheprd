@@ -9,6 +9,7 @@
 //! Windows has neither `lsof` nor `ss`, nor SIGSTOP, and says so.
 // i18n: migrated
 
+mod birth;
 mod error;
 #[cfg(unix)]
 mod naming;
@@ -19,7 +20,7 @@ mod process;
 mod prune;
 mod row;
 #[cfg(unix)]
-mod scan;
+pub(crate) mod scan;
 mod section;
 #[cfg(unix)]
 mod worker;
@@ -27,6 +28,7 @@ mod worker;
 #[cfg(test)]
 mod tests;
 
+pub(crate) use birth::{Birth, Victim};
 pub(crate) use error::Error;
 pub(crate) use prune::orphaned;
 pub(crate) use section::uptime_text;
@@ -35,7 +37,7 @@ use crate::{
     Result,
     browser::WebUrl,
     i18n::Localize,
-    listening_ports::{Bind, Known, Link, Origin, Port},
+    listening_ports::{Bind, Bound, Known, Link, Origin, Port},
     processes::Identity,
     usage::Host,
 };
@@ -65,8 +67,13 @@ const ROW_LIMIT: usize = 512;
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Listener {
     pub identity: Identity,
+    /// Its start as finely as the OS says, which a stop checks again;
+    /// `None` when it could not be read, and then nothing stops it.
+    pub birth: Option<Birth>,
     pub number: u16,
     pub bind: Bind,
+    /// Each address it listens on at this number, which `bind` sums up.
+    pub bound: Vec<Bound>,
     /// The process's name, bounded display text.
     pub process: String,
     /// What to call it: its app, the script it runs, or `process`.
@@ -169,6 +176,14 @@ impl Listener {
         })
     }
 
+    /// What a signal to its process must prove of the pid first.
+    pub(crate) fn victim(&self) -> Victim {
+        Victim {
+            identity: self.identity,
+            birth: self.birth,
+        }
+    }
+
     /// How long its process has run, by the OS's start time.
     pub(crate) fn uptime(&self, now: SystemTime) -> Option<Duration> {
         let started = SystemTime::UNIX_EPOCH + Duration::from_secs(self.identity.started);
@@ -189,16 +204,22 @@ pub(crate) fn home_relative(path: &Path, home: Option<&Path>) -> String {
 #[cfg_attr(not(unix), allow(dead_code))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Outcome {
-    /// Signalled; a stopped one exited within its grace period.
-    Signalled,
-    /// Stopped only by SIGKILL, after ignoring SIGTERM.
-    Killed,
-    /// The OS refused the signal.
-    Failed,
+    // keep-sorted start
     /// Its pid is gone, or now names another process; nothing was sent.
     Exited,
+    /// The OS refused the signal.
+    Failed,
     /// It belongs to another user; nothing was sent.
     Foreign,
+    /// Stopped only by SIGKILL, after ignoring SIGTERM.
+    Killed,
+    /// Signalled; a stopped one exited within its grace period.
+    Signalled,
+    /// The pid could not be proven to name the process listed: its start
+    /// or its owner could not be read, or the OS could not hold it. Nothing
+    /// was sent.
+    Unidentified,
+    // keep-sorted end
 }
 
 /// A signal the user is asked to confirm, and the rows it goes to.
@@ -221,11 +242,14 @@ pub(crate) enum Batch {
 
 impl Pending {
     /// The processes, once each, in the order listed.
-    pub(crate) fn victims(&self) -> Vec<Identity> {
-        let mut victims: Vec<Identity> = Vec::new();
+    pub(crate) fn victims(&self) -> Vec<Victim> {
+        let mut victims: Vec<Victim> = Vec::new();
         for listener in &self.listeners {
-            if !victims.contains(&listener.identity) {
-                victims.push(listener.identity);
+            if !victims
+                .iter()
+                .any(|victim| victim.identity == listener.identity)
+            {
+                victims.push(listener.victim());
             }
         }
         victims
@@ -242,6 +266,8 @@ pub(crate) struct Report {
     pub killed: usize,
     pub gone: usize,
     pub failed: usize,
+    /// Not signalled: not proven to be the process listed.
+    pub unidentified: usize,
 }
 
 impl Report {
@@ -259,6 +285,7 @@ impl Report {
                 }
                 Outcome::Exited => report.gone += 1,
                 Outcome::Failed | Outcome::Foreign => report.failed += 1,
+                Outcome::Unidentified => report.unidentified += 1,
             }
         }
         report
@@ -268,7 +295,7 @@ impl Report {
 #[derive(Debug, PartialEq)]
 pub(crate) enum Command {
     Refresh,
-    Signal(PortAction, Vec<Identity>),
+    Signal(PortAction, Vec<Victim>),
 }
 
 #[cfg_attr(not(unix), allow(dead_code))]
@@ -551,7 +578,7 @@ impl LocalPorts {
 
     /// Asks the worker to signal exactly `victims`, after checking each is
     /// still the process listed.
-    pub(crate) fn signal(&mut self, action: PortAction, victims: Vec<Identity>) -> Result<()> {
+    pub(crate) fn signal(&mut self, action: PortAction, victims: Vec<Victim>) -> Result<()> {
         if self.acting {
             return Err(Error::Busy.into());
         }

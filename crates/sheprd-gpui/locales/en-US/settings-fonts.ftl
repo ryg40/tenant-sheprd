@@ -6,6 +6,8 @@ settings-fonts-use-one = Use one family for all…
 # The family `.SystemUIFont`, the platform's interface font.
 settings-fonts-system-font = System font
 settings-fonts-size = { $size } px
+# Under the Sidebar and Tabs rows while the Desktop layout is on.
+settings-fonts-desktop-face = The Desktop layout draws this in the Interface family at 13 px until you set its family, size, or fallback.
 
 ## The specimen of the face last picked, set in that face.
 

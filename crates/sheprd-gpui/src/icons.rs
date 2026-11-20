@@ -341,6 +341,7 @@ embedded_icons! {
     "sessions.svg",
     "settings.svg",
     "shield.svg",
+    "sort.svg",
     "split.svg",
     "star-full.svg",
     "star.svg",

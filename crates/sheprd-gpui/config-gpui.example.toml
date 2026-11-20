@@ -23,9 +23,11 @@
 # characters take that region's shapes. [terminal] keeps the icons alone.
 # Saved changes to the local file reload automatically in every GUI window.
 
-# Built-ins: Default, Nord, Dracula, Catppuccin Mocha, Catppuccin Latte, plus
-# popular Ghostty themes compiled in, such as TokyoNight, Gruvbox Dark,
-# Rose Pine, Atom One Dark, and GitHub Light Default (Settings lists them all).
+# Built-ins: Default, Nord, Dracula, Catppuccin Mocha, Catppuccin Latte,
+# Sheprd's own Lavender pair (Lavender Light, Lavender Gray), its own Torch
+# pair (Torch Light, Torch Dark), plus popular Ghostty themes compiled in, such
+# as TokyoNight, Gruvbox Dark, Rose Pine, Atom One Dark, and GitHub Light
+# Default (Settings lists them all).
 # Also accepts a Ghostty theme name, an absolute path, or a ~/ path.
 # Set "Follow Herdr" in config-gpui.local.toml to follow the local Herdr theme.
 # On an Omarchy desktop, "Omarchy" follows its current theme as it switches,
@@ -175,8 +177,13 @@ keep_selection_after_copy = true
 # Add "-rounded" to any of them ("normal-rounded", "compact-rounded",
 # "comfortable-rounded") for inset rows with rounded, bordered highlights.
 # "superset" (single-line rows), "orca" (cards), and "minimal" (status and name
-# only) draw rows with a design of their own. "devices" lists each device with
-# its agents under it, and a search over them. View > Layout lists them all.
+# only) draw rows with a design of their own. "desktop" draws Herdr's rows
+# as a desktop app's sidebar: the [ui] family at 13 px (a [sidebar] family,
+# size, or fallback set here still wins), filled rounded highlights, chevrons
+# on the rows that fold, icon buttons at the end of the headings in place of
+# the text links, and a footer of icon-and-label rows. "devices" lists each
+# device with its agents under it, and a search over them. View > Layout
+# lists them all.
 layout = "normal"
 # How tab strips draw their tabs: "classic" (even cells divided by a rule),
 # "pills" (rounded pills led by the agent's logo, the status after the title),
@@ -185,7 +192,8 @@ layout = "normal"
 # (browser-like, the chosen tab joined to its terminal), "curved" (the chosen
 # tab's curved body flows into content sitting in an inset card, and slides
 # between tabs), or "compact" (icons only, the chosen tab named). View > Tab
-# Layout lists them all.
+# Layout lists them all. The "desktop" layout draws "pills" unless your own
+# file sets tab_layout.
 tab_layout = "classic"
 # New tabs run in herdr-core (Herdr 2), whose terminals Sheprd draws and
 # splits into native panes, instead of in Herdr 1. Herdr 1 tabs keep running
@@ -372,7 +380,9 @@ project_roots = []
 [sidebar]
 # Default: "Menlo" on macOS, "Cascadia Mono" on Windows (Consolas when
 # missing), "DejaVu Sans Mono" on Linux (or an installed monospace family such
-# as JetBrains Mono when DejaVu is missing).
+# as JetBrains Mono when DejaVu is missing). The desktop layout draws the
+# sidebar in the [ui] family at 13 px instead, unless your own file sets
+# family, size, or fallback here.
 # family = "DejaVu Sans Mono"
 size = 12
 # fallback = ["Symbols Nerd Font Mono"]
@@ -460,7 +470,9 @@ agent_title = false
 [tabs]
 # Default: "Menlo" on macOS, "Cascadia Mono" on Windows (Consolas when
 # missing), "DejaVu Sans Mono" on Linux (or an installed monospace family such
-# as JetBrains Mono when DejaVu is missing).
+# as JetBrains Mono when DejaVu is missing). The desktop layout draws tabs in
+# the [ui] family at 13 px instead, unless your own file sets family, size,
+# or fallback here.
 # family = "DejaVu Sans Mono"
 size = 12
 # fallback = ["Symbols Nerd Font Mono"]

@@ -1,6 +1,7 @@
-//! The status answer and the setting decide what a click does, and no
-//! answer starts the server: a stopped one is only asked about. The setting
-//! wins unless the program serves its origin.
+//! The status answer and the setting decide what a click does: a stopped
+//! local server is one to start, and one that does not answer one to
+//! restart, which the click does and the command only asks about. The
+//! setting wins unless the program serves its origin.
 use super::*;
 
 fn status(state: State, page: Option<&str>) -> Status {
@@ -11,7 +12,7 @@ fn status(state: State, page: Option<&str>) -> Status {
 }
 
 #[test]
-fn running_opens_stopped_asks_and_the_rest_refuse() {
+fn running_opens_stopped_starts_and_the_rest_refuse() {
     let config = Config::default();
     let page = Some("http://127.0.0.1:6790/browse");
     let browse = || url("http://127.0.0.1:6790/browse");
@@ -25,10 +26,16 @@ fn running_opens_stopped_asks_and_the_rest_refuse() {
     );
     assert_eq!(
         decide(Some(&status(State::Stopped, page)), &config),
-        Some(Action::Ask(browse()))
+        Some(Action::Start(browse()))
     );
     assert_eq!(
         decide(Some(&status(State::Unreachable, page)), &config),
+        Some(Action::Restart(browse()))
+    );
+    // A server on another machine that does not answer is not restarted.
+    let remote = Some("https://artifacts.example.com/browse");
+    assert_eq!(
+        decide(Some(&status(State::Unreachable, remote)), &config),
         Some(Action::Refuse(Refusal::Unreachable))
     );
     assert_eq!(
@@ -42,14 +49,14 @@ fn running_opens_stopped_asks_and_the_rest_refuse() {
 }
 
 #[test]
-fn a_setting_of_the_programs_origin_is_the_page_asked_about() {
+fn a_setting_of_the_programs_origin_is_the_page_a_start_opens() {
     let config = Config {
         url: Some(url("http://127.0.0.1:6790/")),
     };
     let program = Some("http://127.0.0.1:6790/browse");
     assert_eq!(
         decide(Some(&status(State::Stopped, program)), &config),
-        Some(Action::Ask(url("http://127.0.0.1:6790/")))
+        Some(Action::Start(url("http://127.0.0.1:6790/")))
     );
     assert_eq!(
         decide(Some(&status(State::Running, program)), &config),
@@ -61,12 +68,12 @@ fn a_setting_of_the_programs_origin_is_the_page_asked_about() {
     };
     assert_eq!(
         decide(Some(&status(State::Stopped, program)), &config),
-        Some(Action::Ask(url("http://localhost:6790/")))
+        Some(Action::Start(url("http://localhost:6790/")))
     );
 }
 
 #[test]
-fn a_setting_of_another_origin_opens_and_asks_nothing() {
+fn a_setting_of_another_origin_opens_and_starts_nothing() {
     let setting = || url("https://artifacts.example.com/");
     let config = Config {
         url: Some(setting()),
@@ -94,19 +101,19 @@ fn start_asks_about_a_stopped_server_that_the_click_leaves_alone() {
     let stopped = status(State::Stopped, Some("http://127.0.0.1:6790/browse"));
     assert_eq!(
         decide_start(&stopped, &config),
-        Some(Action::Ask(url("http://127.0.0.1:6790/browse")))
+        Some(Action::Start(url("http://127.0.0.1:6790/browse")))
     );
     assert_eq!(
         decide(Some(&stopped), &config),
         Some(Action::Open(url("https://artifacts.example.com/")))
     );
-    // A setting of the program's server is the page asked about, as a click.
+    // A setting of the program's server is the page to start, as for a click.
     let config = Config {
         url: Some(url("http://localhost:6790/")),
     };
     assert_eq!(
         decide_start(&stopped, &config),
-        Some(Action::Ask(url("http://localhost:6790/")))
+        Some(Action::Start(url("http://localhost:6790/")))
     );
     // Any other state follows the click: a running server is not asked about.
     let config = Config {
@@ -127,9 +134,10 @@ fn a_failed_or_empty_answer_opens_the_setting() {
     };
     let same = Some("http://127.0.0.1:6790/browse");
     assert_eq!(decide(None, &config), Some(Action::Open(setting())));
+    // The local server of the setting's origin that does not answer restarts.
     assert_eq!(
         decide(Some(&status(State::Unreachable, same)), &config),
-        Some(Action::Open(setting()))
+        Some(Action::Restart(setting()))
     );
     assert_eq!(
         decide(Some(&status(State::Unconfigured, None)), &config),

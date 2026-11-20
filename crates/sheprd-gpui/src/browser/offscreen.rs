@@ -11,22 +11,24 @@ use super::{
 use crate::SheprdWindow;
 use gpui::{Context, Task, Window};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     rc::Rc,
     sync::{
         Arc,
-        atomic::{AtomicU64, Ordering},
         mpsc::{self, Receiver, SyncSender},
     },
 };
-
-/// Pages are numbered across windows, so a key never names two.
-static NEXT_PAGE: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) struct Pages {
     /// The theme's colors the pages' own lists are drawn in.
     colors: Colors,
     pages: HashMap<TabId, Rc<Page>>,
+    /// The tab of each page that Servo built for a new window, whose
+    /// reports name the popup ([`Source::Popup`]).
+    adopted: HashMap<PageKey, TabId>,
+    /// Tabs whose page stopped, which offer to open it again until the
+    /// window makes their page again ([`super::stopped`]).
+    stopped: HashSet<TabId>,
     /// Only reports from this instance may change the Walkr section.
     walkr: Option<PageKey>,
     /// Only reports from this instance may change the page of a saved
@@ -57,6 +59,8 @@ impl Default for Pages {
         Self {
             colors: Colors::default(),
             pages: HashMap::new(),
+            adopted: HashMap::new(),
+            stopped: HashSet::new(),
             walkr: None,
             walkr_session: None,
             shown: Vec::new(),
@@ -179,14 +183,21 @@ impl Pages {
             self.redraw = Some(cx.spawn(async move |this, cx| {
                 loop {
                     notifier.notified().await;
-                    if this.update(cx, |_, cx| cx.notify()).is_err() {
+                    // The clipboard here, not as the window draws: a read
+                    // waits for its answer, also while the window draws
+                    // nothing.
+                    let served = this.update(cx, |this, cx| {
+                        this.browser.pages.serve_clipboard(this.active, cx);
+                        cx.notify();
+                    });
+                    if served.is_err() {
                         break;
                     }
                 }
             }));
             engine.send(Command::Theme(self.theme.1.clone()))?;
         }
-        let key: PageKey = NEXT_PAGE.fetch_add(1, Ordering::Relaxed);
+        let key = super::engine::page_key();
         let source = if id == TabId::WALKR {
             Source::Walkr(key)
         } else if id == TabId::WALKR_SESSION {
@@ -222,11 +233,45 @@ impl Pages {
             self.retired.clone(),
         );
         self.pages.insert(id, Rc::new(page));
+        self.stopped.remove(&id);
         if id == TabId::WALKR {
             self.walkr = Some(key);
         }
         if id == TabId::WALKR_SESSION {
             self.walkr_session = Some(key);
+        }
+        Ok(())
+    }
+
+    /// Makes tab `id` the window's handle to `popup`, the page that Servo
+    /// built for a page's new window, and tells the engine that the tab
+    /// holds it. Without that word the engine closes the page, and the
+    /// error tells the caller to close the tab, which has no page.
+    pub(crate) fn adopt(
+        &mut self,
+        id: TabId,
+        source: Source,
+        popup: super::engine::Popup,
+        cx: &mut Context<SheprdWindow>,
+    ) -> crate::Result<()> {
+        let engine = Engine::get()?;
+        let (key, mailbox, latest) = popup.adopt()?;
+        let page = Page::new(
+            key,
+            engine,
+            mailbox,
+            latest,
+            (self.reports.clone(), source),
+            cx.focus_handle(),
+            self.retired.clone(),
+        );
+        if let Some(light) = self.light {
+            page.set_light(light);
+        }
+        self.pages.insert(id, Rc::new(page));
+        self.stopped.remove(&id);
+        if let Source::Popup(key) = source {
+            self.adopted.insert(key, id);
         }
         Ok(())
     }
@@ -293,10 +338,26 @@ impl Pages {
         if id == TabId::WALKR_SESSION {
             self.walkr_session = None;
         }
+        self.adopted.retain(|_, tab| *tab != id);
         self.shown.retain(|shown| *shown != id);
         self.drawn.borrow_mut().remove(&id);
+        self.stopped.remove(&id);
         // Dropping the page closes its view on the engine's thread.
         self.pages.remove(&id);
+    }
+
+    /// Drops tab `id`'s page, which failed with `error`. A page whose
+    /// script ended is remembered as stopped.
+    pub(crate) fn fail(&mut self, id: TabId, error: &super::engine::Error) {
+        self.close(id);
+        if matches!(error, super::engine::Error::ScriptEnded) {
+            self.stopped.insert(id);
+        }
+    }
+
+    /// Whether tab `id`'s page stopped and was not made again.
+    pub(crate) fn stopped(&self, id: TabId) -> bool {
+        self.stopped.contains(&id)
     }
 
     /// Drops the pages of tabs the app no longer has.
@@ -305,6 +366,7 @@ impl Pages {
         for id in gone {
             self.close(id);
         }
+        self.stopped.retain(|id| live(*id));
     }
 
     fn send(&self, id: TabId, command: impl FnOnce(PageKey) -> Command) {
@@ -385,6 +447,14 @@ impl Pages {
         self.pages.get(&id).is_some_and(|page| page.took_input())
     }
 
+    /// Does what each page asked of the clipboard, in a window that is
+    /// `active`; an inactive one does nothing of it.
+    fn serve_clipboard(&self, active: bool, cx: &gpui::App) {
+        for page in self.pages.values() {
+            page.serve_clipboard(active, cx);
+        }
+    }
+
     /// Hands the keyboard back from the page to the window.
     pub(crate) fn blur(&self, id: TabId) {
         if let Some(page) = self.pages.get(&id) {
@@ -408,12 +478,41 @@ impl Pages {
                 Source::WalkrSession(key) => {
                     (self.walkr_session == Some(key)).then_some(TabId::WALKR_SESSION)
                 }
+                Source::Popup(key) => self.adopted.get(&key).copied(),
             });
             if resolved.is_some() {
                 return resolved;
             }
         }
-        None
+        // A page whose script stopped says so in its mailbox, which no
+        // full queue loses ([`super::engine`]), and so does a popup's page
+        // that the engine ended as its tab took it.
+        self.pages.iter().find_map(|(id, page)| {
+            if page.mailbox().refused.take() {
+                return Some(Event::Closed(*id));
+            }
+            let stopped = page.mailbox().stopped.take();
+            stopped.then_some(Event::Failed(*id, super::engine::Error::ScriptEnded))
+        })
+    }
+}
+
+impl SheprdWindow {
+    /// The window stopped being the active one: no page of it keeps a
+    /// grant to use the clipboard.
+    pub(crate) fn end_page_clipboard_grants(&self) {
+        for page in self.browser.pages.pages.values() {
+            page.end_clipboard_grants();
+        }
+    }
+
+    /// The window stopped being the active one: the page with its keyboard
+    /// holds no modifier key, as it hears no release from now on.
+    pub(crate) fn release_page_keys(&self) {
+        let pages = self.browser.pages.pages.values();
+        for page in pages.filter(|page| page.holds_keyboard()) {
+            page.hold(gpui::Modifiers::default());
+        }
     }
 }
 

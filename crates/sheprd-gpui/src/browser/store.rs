@@ -153,6 +153,8 @@ pub(crate) struct Tab {
     /// `None` for a new tab still waiting for an address.
     pub location: Option<Location>,
     /// The page's own title once it reports one; the host until then.
+    /// A saved tab without one is given its address's at the start.
+    #[serde(default)]
     pub title: String,
     /// The Herdr pane whose agent opened the tab, which notes on the page
     /// go back to.
@@ -313,6 +315,14 @@ impl Store {
         // A tab that a site sent away, as a sign-in does, starts again on
         // the address it was asked for.
         asked.restore(&mut tabs);
+        // A saved tab has no page until it is shown, so its saved title is
+        // all that names it; one saved without a title is named as a page
+        // that gave none is.
+        for tab in tabs.iter_mut().filter(|tab| tab.title.is_empty()) {
+            if let Some(location) = tab.location.as_ref().filter(|_| !tab.place.is_editor()) {
+                tab.title = clean_title(&location.default_title());
+            }
+        }
         // Earlier builds hosted the orchestrator in a tab; its sections now
         // own it, so such tabs are dropped rather than restored.
         tabs.retain(|tab| {

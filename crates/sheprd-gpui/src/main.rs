@@ -24,6 +24,7 @@ mod caffeine;
 mod caption;
 mod caret;
 mod chat;
+mod chrome_button;
 mod cli;
 mod close_modal;
 // `cloud` is the machinery every provider shares; alone it offers nothing to add.

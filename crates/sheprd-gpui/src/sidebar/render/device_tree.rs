@@ -67,9 +67,10 @@ impl SheprdWindow {
             return (list, 0, None);
         };
         let theme = &self.theme;
+        let font = self.config.sidebar_font();
         let row_cx = RowContext {
             indicators,
-            font: &self.config.sidebar,
+            font: &font,
             theme,
             look,
             width,

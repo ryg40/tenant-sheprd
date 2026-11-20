@@ -12,19 +12,23 @@ pub(in crate::browser) fn up(event: &KeyUpEvent) -> InputEvent {
     input(&event.keystroke, KeyState::Up, false)
 }
 
-fn input(keystroke: &Keystroke, state: KeyState, repeat: bool) -> InputEvent {
-    let held = keystroke.modifiers;
+/// The modifier keys `held` names, as Servo's: Super is Meta.
+pub(in crate::browser) fn held(held: gpui::Modifiers) -> Modifiers {
     let mut modifiers = Modifiers::empty();
     modifiers.set(Modifiers::CONTROL, held.control);
     modifiers.set(Modifiers::SHIFT, held.shift);
     modifiers.set(Modifiers::ALT, held.alt);
     modifiers.set(Modifiers::META, held.platform);
+    modifiers
+}
+
+fn input(keystroke: &Keystroke, state: KeyState, repeat: bool) -> InputEvent {
     InputEvent::Keyboard(KeyboardEvent::new_without_event(
         state,
         key(keystroke),
         code(&keystroke.key),
         Location::Standard,
-        modifiers,
+        held(keystroke.modifiers),
         repeat,
         false,
     ))

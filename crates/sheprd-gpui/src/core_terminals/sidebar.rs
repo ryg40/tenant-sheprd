@@ -37,7 +37,7 @@ impl SheprdWindow {
             return None;
         }
         let theme = &self.theme;
-        let font = &self.config.sidebar;
+        let font = &*self.config.sidebar_font();
         let indicators = self.core_indicators(cx);
         let hover = theme.active;
         let rows = panes.into_iter().map(|(tab, terminal)| {

@@ -130,6 +130,8 @@ fn the_clear_button_stays_inside_the_field_at_large_sizes(cx: &mut gpui::TestApp
                 let mut view = connected(window, cx);
                 view.config.layout.mode = mode;
                 view.config.sidebar.size = font_size;
+                // As the user's own size, which desktop's `[ui]` face takes too.
+                view.config.sidebar_font_keys.size = true;
                 view
             });
             cx.simulate_resize(size(px(800.), px(700.)));

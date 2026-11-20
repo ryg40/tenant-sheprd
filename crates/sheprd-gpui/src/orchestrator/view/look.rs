@@ -202,20 +202,9 @@ impl Look {
         path: &'static str,
         label: impl Into<SharedString>,
     ) -> Stateful<Div> {
-        let hover = self.theme.active;
-        div()
-            .id(id)
+        crate::chrome_button::icon_button(id, path, corners::SMALL, &self.theme)
             .role(Role::Button)
             .aria_label(label)
-            .flex_none()
-            .size(px(24.))
-            .flex()
-            .items_center()
-            .justify_center()
-            .rounded(px(corners::SMALL))
-            .hover(move |style| style.bg(rgb(hover)))
-            .cursor_pointer()
-            .child(self.icon(path, 14., self.theme.subtext()))
     }
 
     /// A filter pill: a quiet fill, the accent wash while on.

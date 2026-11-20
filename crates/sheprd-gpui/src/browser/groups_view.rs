@@ -521,22 +521,20 @@ impl SheprdWindow {
         }
     }
 
-    /// The group `pick` is live in, if any.
+    /// The group `tab` belongs to in its workspace, whether that workspace
+    /// is focused and whether the group shows the tab or not.
     #[cfg(embedded_pages)]
-    pub(crate) fn group_showing(&self, pick: &Pick, cx: &App) -> Option<GroupId> {
-        self.group_slots()
-            .into_iter()
-            .map(|slot| slot.id)
-            .find(|group| match (self.group_shown(*group, cx), pick) {
-                (Shown::Terminal, Pick::Herdr(_)) => self.group_pick(*group).as_ref() == Some(pick),
-                (Shown::Page(id), Pick::Page(page)) => id == *page,
-                _ => false,
-            })
+    pub(crate) fn group_owning(&mut self, tab: &Tab) -> GroupId {
+        let workspace = (tab.scope.clone(), tab.workspace_id.clone());
+        self.layout_for(workspace).owner(&Pick::Page(tab.id))
     }
 
-    /// The pages live in some group, which the window presents.
+    /// The pages live in some group the window draws, which it presents.
     #[cfg(embedded_pages)]
     pub(crate) fn live_pages(&self, cx: &App) -> Vec<TabId> {
+        if !self.draws_groups() {
+            return Vec::new();
+        }
         self.drawn_group_slots()
             .into_iter()
             .filter_map(|slot| match self.group_shown(slot.id, cx) {
@@ -775,17 +773,7 @@ impl SheprdWindow {
             self.ensure_editor_page(editor, window, cx);
         } else {
             #[cfg(embedded_pages)]
-            match self.browser.pages.ensure(&tab, window, cx) {
-                Ok(()) => {
-                    self.browser.failed.remove(&id);
-                }
-                Err(error) => {
-                    tracing::warn!(%error, "Cannot create a browser page");
-                    self.browser
-                        .failed
-                        .insert(id, crate::i18n::Localize::localize(&error).into());
-                }
-            }
+            self.make_tab_page(&tab, window, cx);
         }
         self.sync_address(group, Some(&tab), true, window, cx);
         if tab.location.is_none() && !tab.place.is_editor() {

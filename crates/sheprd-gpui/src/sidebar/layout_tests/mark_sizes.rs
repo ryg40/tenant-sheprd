@@ -23,6 +23,8 @@ fn measure(
 ) -> Vec<(&'static str, Option<Bounds<Pixels>>)> {
     view.update(cx, |view, cx| {
         view.config.sidebar.size = font_size;
+        // As the user's own size, which desktop's `[ui]` face takes too.
+        view.config.sidebar_font_keys.size = true;
         cx.notify();
     });
     cx.update(|window, cx| full_draw(window, cx).clear(cx));
@@ -104,14 +106,15 @@ fn marks_grow_with_the_sidebar_font(cx: &mut gpui::TestAppContext) {
             }
         }
         // The chevron's column grows with its glyph. Herdr's and Minimal's
-        // rows keep the gap before it, so theirs grows by its default width.
+        // rows keep the gap before it, so theirs grows by its default width;
+        // desktop draws Herdr's rows.
         let fold = |measured: &[(&str, Option<Bounds<Pixels>>)]| {
             bounds(measured, "collapse-3").map(|fold| fold.size.width)
         };
         if let (Some(small), Some(large)) = (fold(&small), fold(&large)) {
             drawn += 1;
             let growth = match mode {
-                LayoutMode::Classic { .. } | LayoutMode::Minimal => {
+                LayoutMode::Classic { .. } | LayoutMode::Minimal | LayoutMode::Desktop => {
                     px(crate::sidebar::ARROW_RESERVE)
                 }
                 _ => small,

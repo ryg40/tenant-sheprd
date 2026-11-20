@@ -179,6 +179,15 @@ impl PortForwards {
         self.forwards.len() != before
     }
 
+    /// Stops each forward that listens on `local_port` here, as [`Self::stop`]
+    /// does. Returns whether any stopped.
+    pub fn stop_local(&mut self, local_port: u16) -> bool {
+        let before = self.forwards.len();
+        self.forwards
+            .retain(|forward| forward.state != State::Listening { local_port });
+        self.forwards.len() != before
+    }
+
     /// Stops forwards of hosts `keep` rejects. Returns whether any stopped.
     pub fn retain_hosts(&mut self, keep: impl Fn(&str) -> bool) -> bool {
         let before = self.forwards.len();

@@ -116,6 +116,8 @@ interface artwork.
 rolled-up scroll, for the Artifacts button.
 `walkr.svg` is original Apache-2.0 interface artwork drawn for this fork: a bare
 footprint, for Walkr.
+`sort.svg` is original Apache-2.0 interface artwork drawn for this fork: three
+falling bars beside a down arrow, for the agents list's sort.
 GPUI renders these as masks tinted by the current theme.
 
 `gitlab.svg` is GitLab's tanuki mark from

@@ -372,6 +372,8 @@ impl SheprdWindow {
         self.advance_close_run(window, cx);
         self.ensure_code_page(window, cx);
         self.ensure_px0_page(window, cx);
+        #[cfg(servo_pages)]
+        self.ensure_shown_pages(window, cx);
         self.poll_deliveries(cx);
         self.poll_reveal(window, cx);
         self.poll_reviews(cx);
@@ -508,7 +510,7 @@ impl SheprdWindow {
             }
             #[cfg(servo_pages)]
             Event::Failed(id, error) => {
-                self.browser.pages.close(id);
+                self.browser.pages.fail(id, &error);
                 let error = crate::Error::from(error);
                 self.browser
                     .failed
@@ -531,7 +533,7 @@ impl SheprdWindow {
                     self.show_browser_tab_in(opened.0, opened.1, window, cx);
                 }
             }
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", servo_pages))]
             Event::Opened(TabId::WALKR, url, _, _) => {
                 // The section has no workspace; open an unrelated tab in the
                 // focused one, but never the run's own server.
@@ -539,21 +541,33 @@ impl SheprdWindow {
                     self.open_browser_tab(Some(url), window, cx);
                 }
             }
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", servo_pages))]
             Event::Opened(id, url, source, popup) => {
+                // A page the engine already ended gets no tab.
+                #[cfg(servo_pages)]
+                if popup.ended() {
+                    return;
+                }
                 // Without a tab the popup is dropped, and with it the
                 // opener's link to it.
                 if let Some((group, opened)) = self.open_beside(id, url, cx) {
-                    if let Err(error) = self.browser.pages.adopt(opened, source, popup, window) {
-                        tracing::warn!(%error, "Cannot show a popup's page");
-                        self.browser
-                            .failed
-                            .insert(opened, crate::i18n::Localize::localize(&error).into());
+                    #[cfg(target_os = "macos")]
+                    let adopted = self.browser.pages.adopt(opened, source, popup, window);
+                    #[cfg(servo_pages)]
+                    let adopted = self.browser.pages.adopt(opened, source, popup, cx);
+                    match adopted {
+                        Ok(()) => self.show_browser_tab_in(group, opened, window, cx),
+                        // The tab goes before it shows. Its address loaded
+                        // as a page of its own would lose the navigation
+                        // that the popup made: its request and its opener.
+                        Err(error) => {
+                            tracing::warn!(%error, "Cannot show a popup's page");
+                            self.close_browser_tab(opened, window, cx);
+                        }
                     }
-                    self.show_browser_tab_in(group, opened, window, cx);
                 }
             }
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", servo_pages))]
             Event::Closed(id) => self.close_browser_tab(id, window, cx),
         }
     }
@@ -609,7 +623,8 @@ impl SheprdWindow {
     }
 
     /// Opens a tab on `url` for a page of tab `opener`, in its workspace and
-    /// in the group showing it. Returns that group and the new tab.
+    /// in the group that tab belongs to there, also while it is not shown.
+    /// Returns that group and the new tab.
     #[cfg(embedded_pages)]
     fn open_beside(
         &mut self,
@@ -618,7 +633,7 @@ impl SheprdWindow {
         cx: &mut Context<Self>,
     ) -> Option<(Option<GroupId>, TabId)> {
         let parent = store(cx).and_then(|store| store.get(opener)).cloned()?;
-        let group = self.group_showing(&Pick::Page(opener), cx);
+        let group = Some(self.group_owning(&parent));
         let opened = Store::update(cx, |store| {
             store.open(
                 parent.scope,

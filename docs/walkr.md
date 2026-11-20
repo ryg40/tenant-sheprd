@@ -732,7 +732,7 @@ On Linux with Servo, `sheprd browser clear-data` also clears the data of the
 Walkr page after the user confirms the app's dialog. See [site storage](linux-browser-plan.md#what-sites-keep-between-runs)
 for running-engine limits and the restart needed to finish clearing some data.
 
-Servo cannot paste into the page or use an input method. Some pages can stop
+Servo cannot use an input method. Some pages can stop
 a tab when their script thread dies, and the tab shows no message when it does.
 For `walkr.url`, use **Open in a tab** for the browser controls if the
 section page fails; it uses the same engine and does not remove those engine

@@ -2,7 +2,7 @@ use super::*;
 use crate::controls::Command;
 
 /// A window listing `demo-coord`, `demo-12`, and `other-1`.
-fn grouped(window: &mut Window, cx: &mut Context<SheprdWindow>) -> SheprdWindow {
+pub(super) fn grouped(window: &mut Window, cx: &mut Context<SheprdWindow>) -> SheprdWindow {
     let mut view = fixture_window(window, cx);
     view.config.sidebar_style.coordinator_suffix = Some("-coord".into());
     let snapshot = Arc::make_mut(view.live.snapshot.as_mut().unwrap());

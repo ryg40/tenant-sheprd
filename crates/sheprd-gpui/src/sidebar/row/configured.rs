@@ -2,8 +2,8 @@
 //! built-in name and detail lines.
 
 use super::{
-    RowIcon, RowKind, agent_icon_size, agent_mark, label_text, left_behind, place_line, row_text,
-    shared_label_text,
+    RowIcon, RowKind, Sizing, agent_icon_size, agent_mark, fair_line, label_text, left_behind,
+    place_line, row_text, shared_label_text,
 };
 use crate::{
     config::Theme,
@@ -11,7 +11,9 @@ use crate::{
         ICON_RESERVE,
         agents::status_mark,
         cell::RowContext,
-        glyph_width, line_height, scaled,
+        glyph_width,
+        layout::Face,
+        line_height, scaled,
         tokens::{ResolvedToken, TextRole, TokenKind, budgets, separator},
     },
 };
@@ -81,10 +83,46 @@ fn fixed_glyphs(kind: &TokenKind, glyph: f32, status_width: f32) -> usize {
     }
 }
 
-/// Fixed token widths preserve GPUI's text truncation during layout.
+/// The git counters a `git_status` token shows, each with the palette entry
+/// its arrow is inked in.
+fn git_counts(ahead: usize, behind: usize) -> impl Iterator<Item = (String, usize)> {
+    [("↑", ahead, 2), ("↓", behind, 1)]
+        .into_iter()
+        .filter(|(_, count, _)| *count > 0)
+        .map(|(arrow, count, palette)| (format!("{arrow}{count}"), palette))
+}
+
+/// How a token's cell takes its width in a proportional face: its text
+/// shares the line, an icon or the git counters keep their own.
+fn token_sizing(token: &ResolvedToken, look: TokenLook, glyph: f32, cx: &RowContext<'_>) -> Sizing {
+    // The weight its cell paints in; the counters' is the token's `bold`.
+    let (_, weight) = styled(
+        token_appearance(&token.kind, look, cx),
+        token.style,
+        cx.theme,
+    );
+    match &token.kind {
+        TokenKind::Text(text, _) => Sizing::Share(text.clone(), Some(weight)),
+        TokenKind::StateIcon => Sizing::Keep(cx.indicators.width(cx.font), Vec::new()),
+        TokenKind::GitStatus { ahead, behind } => {
+            let counts: Vec<_> = git_counts(*ahead, *behind)
+                .map(|(text, _)| (SharedString::from(text), Some(weight)))
+                .collect();
+            // The cell's gap between its counters.
+            Sizing::Keep(glyph * counts.len().saturating_sub(1) as f32, counts)
+        }
+    }
+}
+
+/// Fixed token widths preserve GPUI's text truncation during layout. In a
+/// proportional face the budgets only choose which tokens show: the text
+/// ones then share the line by the same rule in measured pixels
+/// ([`fair_line`]), and each truncates at its share.
 fn token_line(row: &[ResolvedToken], look: TokenLook, width: f32, cx: &RowContext<'_>) -> Div {
     let status = look.status;
     let (font, theme) = (cx.font, cx.theme);
+    let face = cx.look.density.face;
+    let flexed = face == Face::Proportional;
     let glyph = glyph_width(font);
     let budgets = budgets(
         row,
@@ -130,11 +168,10 @@ fn token_line(row: &[ResolvedToken], look: TokenLook, width: f32, cx: &RowContex
                     )
                     .debug_selector(|| "inline-status-mark".into()),
                 ),
-            TokenKind::GitStatus { ahead, behind } => cell.flex().gap(px(glyph)).children(
-                [("↑", *ahead, 2), ("↓", *behind, 1)]
-                    .into_iter()
-                    .filter(|(_, count, _)| *count > 0)
-                    .map(|(arrow, count, palette)| {
+            TokenKind::GitStatus { ahead, behind } => {
+                cell.flex()
+                    .gap(px(glyph))
+                    .children(git_counts(*ahead, *behind).map(|(count, palette)| {
                         let (color, weight) = styled(
                             (theme.ink(theme.palette[palette]), FontWeight::NORMAL),
                             token.style,
@@ -144,12 +181,19 @@ fn token_line(row: &[ResolvedToken], look: TokenLook, width: f32, cx: &RowContex
                             .flex_none()
                             .text_color(rgb(color))
                             .font_weight(weight)
-                            .child(label_text(&format!("{arrow}{count}")))
-                    }),
-            ),
+                            .child(label_text(&count))
+                    }))
+            }
             // Only text the budget cuts short truncates. An emoji's font is wider
             // than two estimated glyphs, so a label that fits by its display
             // width may overhang its cell slightly rather than collapse to "…".
+            // A proportional face's widths are not its glyph counts, so there
+            // every text truncates at the width its share gives it.
+            TokenKind::Text(text, _) if flexed => cell
+                .truncate()
+                .font_weight(weight)
+                .text_color(rgb(color))
+                .child(shared_label_text(text.clone())),
             TokenKind::Text(text, _) if text.width() <= *budget => cell
                 .whitespace_nowrap()
                 .font_weight(weight)
@@ -163,6 +207,15 @@ fn token_line(row: &[ResolvedToken], look: TokenLook, width: f32, cx: &RowContex
         };
         (gap, advance, cell)
     });
+    if flexed {
+        let sizings = visible
+            .iter()
+            .map(|(token, _)| token_sizing(token, look, glyph, cx));
+        let parts = parts
+            .zip(sizings)
+            .map(|((gap, _, cell), sizing)| (gap, cell, sizing));
+        return fair_line(parts, width, font, theme.muted);
+    }
     place_line(parts, width, font, theme.muted)
 }
 
@@ -288,10 +341,14 @@ pub(super) fn configured_lines(
                 theme.muted,
             ));
         }
+        let density = cx.look.density;
         text = text.child(
             token_line(line_tokens(index, line), look, text_width, cx)
                 .debug_selector(|| selector.clone())
-                .ml(px(reserve.min(label_width))),
+                .ml(px(reserve.min(label_width)))
+                .when(index > 0 && density.detail_step > 0., |line| {
+                    line.text_size(px(density.detail_size(font)))
+                }),
         );
         column = column.child(text);
     }

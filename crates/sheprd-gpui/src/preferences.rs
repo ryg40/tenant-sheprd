@@ -129,6 +129,8 @@ pub struct Chrome {
     pub agent_sort: Option<AgentSort>,
     /// The device IDs in the order the user dragged them into.
     pub device_order: Vec<String>,
+    /// The file explorer's width, once dragged.
+    pub file_tree_width: Option<f32>,
     pub kanban_lane_order: Vec<LaneKey>,
     /// Each Kanban lane's order of implementation, by native item ID.
     pub kanban_ranks: crate::orchestrator::view::kanban::rank::Ranks,
@@ -346,6 +348,7 @@ fn read_chrome(path: &Path) -> crate::Result<Chrome> {
             .and_then(crate::sidebar::ActivityPanel::parse),
         agent_sort,
         device_order: device_order(object.get("device_order")),
+        file_tree_width: panel_width("file_tree_width_px"),
         kanban_lane_order: order::bounded(
             object
                 .get("kanban_lane_order")
@@ -468,6 +471,9 @@ fn write_chrome(path: &Path, chrome: Chrome) -> crate::Result<()> {
                 "notes_width_px": chrome.notes_width.filter(|width| width.is_finite() && *width > 0.0),
                 "mod_panel_width_px": chrome
                     .mod_panel_width
+                    .filter(|width| width.is_finite() && *width > 0.0),
+                "file_tree_width_px": chrome
+                    .file_tree_width
                     .filter(|width| width.is_finite() && *width > 0.0),
                 "review_files_width_px": chrome
                     .review_files_width

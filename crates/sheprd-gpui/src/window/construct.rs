@@ -116,6 +116,10 @@ impl SheprdWindow {
                     this.selection = None;
                 }
                 this.pressed_terminal_link = None;
+                #[cfg(servo_pages)]
+                this.end_page_clipboard_grants();
+                #[cfg(servo_pages)]
+                this.release_page_keys();
             }
             this.report_focus();
             cx.notify();

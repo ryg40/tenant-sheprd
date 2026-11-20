@@ -8,7 +8,9 @@ use super::{
     ARROW_RESERVE, ICON_RESERVE, STATUS_WIDTH,
     agents::{Indicators, status_indicator},
     cell::{RowContext, RowState},
-    glyph_width, line_height, scaled, segment_budgets,
+    glyph_width,
+    layout::Face,
+    line_height, scaled, segment_budgets,
     tokens::ResolvedToken,
 };
 use crate::config::{FontConfig, Theme};
@@ -20,6 +22,7 @@ use unicode_width::UnicodeWidthStr;
 
 mod badge;
 mod configured;
+mod fair_line;
 
 pub(crate) use badge::compact;
 pub(super) use badge::{Counts, PrBadge, RowBadge, Upstream};
@@ -28,6 +31,7 @@ pub(crate) use configured::styled;
 pub(super) use configured::{
     TokenLook, configured_status, configured_status_style, leading_status, token_column,
 };
+use fair_line::{Sizing, fair_line};
 
 /// What a row shows in its leading icon slot: a repository owner's avatar when
 /// one is cached, the GitHub mark while it is not, an empty slot for a folder
@@ -320,16 +324,39 @@ pub(super) fn trunk_below(
 }
 
 /// A row's first line: segments joined by upstream's separator, the primary one
-/// carrying the row's weight and color while the rest stay muted. Segments are
-/// placed at measured offsets rather than flexed, because GPUI 0.2.2 only
-/// ellipsizes text whose width its parent already fixed.
+/// carrying the row's weight and color while the rest stay muted. In a
+/// monospace face, the segments share the line in glyphs as upstream shares
+/// it, each placed at the offset its share measures. A proportional face's
+/// glyph counts measure nothing, so there they share it by the same rule in
+/// measured pixels ([`fair_line`]), and each truncates at its share.
 pub(super) fn name_line(
     segments: &[(&str, bool)],
     appearance: (u32, FontWeight, u32),
     width: f32,
     font: &FontConfig,
+    face: Face,
 ) -> Div {
     let (primary, weight, muted) = appearance;
+    let segment = |text: &str, is_primary: bool| {
+        div()
+            .truncate()
+            .when(is_primary, |part| {
+                part.font_weight(weight).text_color(rgb(primary))
+            })
+            .when(!is_primary, |part| part.text_color(rgb(muted)))
+            .child(label_text(text))
+    };
+    if face == Face::Proportional {
+        let parts = segments
+            .iter()
+            .enumerate()
+            .map(|(index, (text, is_primary))| {
+                let separator = if index == 0 { "" } else { " · " };
+                let sizing = Sizing::Share(SharedString::from(*text), is_primary.then_some(weight));
+                (separator, segment(text, *is_primary), sizing)
+            });
+        return fair_line(parts, width, font, muted);
+    }
     let glyph = glyph_width(font);
     let separator = 3. * glyph;
     let separators = segments.len().saturating_sub(1);
@@ -352,18 +379,14 @@ pub(super) fn name_line(
                     } else {
                         0.
                     };
-                let cell = div()
-                    .truncate()
-                    .when(*is_primary, |part| {
-                        part.font_weight(weight).text_color(rgb(primary))
-                    })
-                    .when(!*is_primary, |part| part.text_color(rgb(muted)))
-                    .child(label_text(text));
+                let cell = segment(text, *is_primary);
                 (if index == 0 { "" } else { " · " }, advance, cell)
             });
     place_line(parts, width, font, muted)
 }
 
+/// Lays out a monospace line's cells, each after its separator, at the
+/// offsets their `advance`s measure.
 fn place_line(
     parts: impl IntoIterator<Item = (&'static str, f32, Div)>,
     width: f32,
@@ -523,7 +546,7 @@ pub(super) fn row(
     // the same way it yields to a badge, and like the badge it is clipped to
     // the room left rather than painting past the row.
     let status_width = status_text.map_or(0., |text| {
-        (text.width() as f32 * glyph_width(font))
+        (text.width() as f32 * layout.glyph(font))
             .ceil()
             .min((available - pr_reserve - gap).max(0.))
     });
@@ -533,7 +556,7 @@ pub(super) fn row(
         0.
     };
     let status_color = indicators.color(status);
-    let glyph = glyph_width(font);
+    let glyph = layout.glyph(font);
     // A workspace's second line carries the counts after its branch, as the
     // TUI does. A one-line row has no branch line, so a trailing column keeps
     // them visible in compact densities and on worktree children.
@@ -661,6 +684,7 @@ pub(super) fn row(
                                         (name_color, weight, theme.muted),
                                         (label_width - name_reserve).max(0.),
                                         font,
+                                        layout.face,
                                     )
                                     .debug_selector(|| format!("name-{key}"))
                                     .ms(px(name_reserve.min(label_width))),
@@ -675,6 +699,9 @@ pub(super) fn row(
                                     .relative()
                                     .w(px(detail_limit))
                                     .h(px(line_height(font)))
+                                    .when(layout.detail_step > 0., |line| {
+                                        line.text_size(px(layout.detail_size(font)))
+                                    })
                                     .when_some(agent_detail, |line, icon| {
                                         line.child(agent_mark(
                                             key,

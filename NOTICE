@@ -53,7 +53,9 @@ The built-in theme files in assets/themes/ are unmodified copies from
 iTerm2-Color-Schemes (https://github.com/mbadolato/iTerm2-Color-Schemes),
 Copyright (c) 2011 to Present Mark Badolato, MIT License; each theme's
 copyright belongs to its author. crates/sheprd-gpui/THEMES-NOTICE.md has the
-revision and the full license text.
+revision and the full license text. Lavender Light, Lavender Gray, Torch Light,
+and Torch Dark are the exception: they are this project's own themes, with no
+upstream, licensed under this project's Apache License 2.0.
 
 The icon assets/icons/kanban.svg is original interface artwork: three rounded
 vertical bars, licensed under this project's Apache License 2.0.

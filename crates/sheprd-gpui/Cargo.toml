@@ -130,7 +130,9 @@ railway = ["cloud", "sheprd-client/railway", "sheprd-remote/railway"]
 # Fly Sprites as devices, with an API token and this app as their exec relay.
 sprites = ["cloud", "sheprd-client/sprites", "sheprd-remote/sprites"]
 # Linux only, and off by default: browser tabs inside the window, drawn by
-# Servo (docs/linux-browser-plan.md). It adds about 113 MB to the binary and
+# Servo (docs/linux-browser-plan.md), an unreleased commit of its main branch
+# until 0.9.0 is on crates.io (the root Cargo.toml). It adds about 113 MB to
+# a release binary (measured with 0.8.0), fetches Servo and stylo by git, and
 # downloads SpiderMonkey at build time. Elsewhere it turns nothing on.
 servo = ["dep:crossbeam-channel", "dep:dpi", "dep:euclid", "dep:rustls", "dep:servo"]
 # Development only: `--mockup` shows UI variants from HERDR_MOCKUP_FILE side by

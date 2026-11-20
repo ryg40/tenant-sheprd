@@ -185,8 +185,8 @@ pub(crate) struct TabState {
 /// Read-only inputs every tab of one strip shares.
 pub(crate) struct TabContext<'a> {
     pub(crate) theme: &'a Theme,
-    /// The tab font.
-    pub(crate) font: &'a FontConfig,
+    /// The tab font, [`crate::config::Config::tabs_font`].
+    pub(crate) font: std::borrow::Cow<'a, FontConfig>,
     pub(crate) indicators: Indicators,
     pub(crate) fill: Fill,
     pub(crate) slot: Slot,
@@ -361,7 +361,7 @@ fn lead_mark(
 ) -> Option<AnyElement> {
     match mark {
         Mark::Herdr { status, .. } => (mark.lead() == Lead::Status).then(|| {
-            status_indicator(*status, cx.font, cx.indicators)
+            status_indicator(*status, &cx.font, cx.indicators)
                 .mt_0()
                 .debug_selector(probe.status(cx.slot))
                 .into_any_element()

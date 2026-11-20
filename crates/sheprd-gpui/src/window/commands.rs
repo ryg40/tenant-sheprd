@@ -78,12 +78,14 @@ impl SheprdWindow {
         save: impl FnOnce(TabLayoutMode) -> crate::Result<()> + Send + 'static,
         cx: &mut Context<Self>,
     ) {
-        if self.config.tab_layout == mode {
+        if self.config.tab_layout_in_use() == mode {
             return;
         }
-        self.config.tab_layout = mode;
+        self.config.choose_tab_layout(mode);
         if cx.has_global::<InitialAppearance>() {
-            cx.global_mut::<InitialAppearance>().config.tab_layout = mode;
+            cx.global_mut::<InitialAppearance>()
+                .config
+                .choose_tab_layout(mode);
         }
         crate::menus::install(cx);
         cx.notify();

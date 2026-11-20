@@ -9,4 +9,5 @@ layout-comfortable-rounded = Comfortable Rounded
 layout-superset = Superset
 layout-orca = Orca
 layout-minimal = Minimal
+layout-desktop = Desktop
 layout-devices = Devices

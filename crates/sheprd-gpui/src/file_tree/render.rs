@@ -7,6 +7,9 @@ use super::{
 };
 use crate::{SheprdWindow, i18n::fl};
 use gpui::{prelude::*, *};
+use sheprd_client::text::safe_text;
+use sheprd_vcs::file_tree::{self, Omitted};
+use std::path::Path;
 
 /// How far each level of the tree is set in.
 const INDENT: f32 = 14.;
@@ -18,7 +21,7 @@ fn icon(what: &What) -> &'static str {
         What::File(FileKind::Markdown) => "icons/note.svg",
         What::File(FileKind::Html) => "icons/globe.svg",
         What::Link => "icons/external.svg",
-        What::More => "icons/more.svg",
+        What::More(_) | What::Cut => "icons/more.svg",
         What::Failed(_) => "icons/error.svg",
         What::File(FileKind::Other) | What::Other | What::Loading => "icons/file.svg",
     }
@@ -64,12 +67,19 @@ impl SheprdWindow {
         let theme = &self.theme;
         let size = self.config.ui.size;
         let label: SharedString = match &found.what {
-            What::More => fl!("file-tree-more").into(),
+            What::More(Omitted::Exactly(count)) => fl!("file-tree-more", count = *count).into(),
+            What::More(Omitted::AtLeast(count)) => {
+                fl!("file-tree-more-at-least", count = *count).into()
+            }
+            What::Cut => fl!("file-tree-cut").into(),
             What::Loading => fl!("file-tree-loading").into(),
             What::Failed(error) => error.clone().into(),
             _ => found.label.clone(),
         };
-        let entry = !matches!(found.what, What::More | What::Loading | What::Failed(_));
+        let entry = !matches!(
+            found.what,
+            What::More(_) | What::Cut | What::Loading | What::Failed(_)
+        );
         let dim = found.ignored || !entry || matches!(found.what, What::Other | What::Link);
         let selected = tree.selected.as_deref() == Some(found.path.as_str());
         let shows = entry && active == Some(found.path.as_str());
@@ -112,6 +122,40 @@ impl SheprdWindow {
                 }))
                 .into_any_element(),
         )
+    }
+
+    /// The row above the tree that names its root: the checkout, or the
+    /// pane's folder outside one. The whole path shows on hover. The folder
+    /// comes from the daemon's pane, so its names are untrusted: they are
+    /// bounded and lose the characters the tree lists no name with.
+    fn file_tree_root_row(&self, root: &Path) -> Stateful<Div> {
+        let theme = &self.theme;
+        let full = root.to_string_lossy();
+        let path: SharedString = safe_text(&full, file_tree::MAX_PATH_BYTES).into();
+        let name: SharedString = root.file_name().map_or_else(
+            || path.clone(),
+            |name| safe_text(&name.to_string_lossy(), file_tree::MAX_NAME_BYTES).into(),
+        );
+        let (foreground, surface) = (theme.foreground, theme.sidebar_background());
+        div()
+            .id("file-tree-root")
+            .debug_selector(|| "file-tree-root".into())
+            .flex_none()
+            .px(px(8.))
+            .pt(px(6.))
+            .pb(px(2.))
+            .font_weight(FontWeight::SEMIBOLD)
+            .text_color(rgb(theme.muted))
+            .truncate()
+            .child(name)
+            .tooltip(move |_, cx| {
+                cx.new(|_| crate::usage::Hint {
+                    text: path.clone(),
+                    foreground,
+                    surface,
+                })
+                .into()
+            })
     }
 
     pub(crate) fn render_file_tree(&self, cx: &mut Context<Self>) -> Stateful<Div> {
@@ -202,6 +246,9 @@ impl SheprdWindow {
             .text_size(px(size))
             .text_color(rgb(theme.foreground))
             .child(header)
+            .when_some(tree.ready_root(), |panel, root| {
+                panel.child(self.file_tree_root_row(root))
+            })
             .child(body)
     }
 }

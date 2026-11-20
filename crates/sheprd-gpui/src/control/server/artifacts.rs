@@ -1,7 +1,8 @@
 //! `sheprd artifacts`: each operation reads the status through the window's
 //! own path (the button's job slot), then answers. `start` and `off` only
-//! open the app's question and answer at once; the user confirms there.
-//! `open` starts nothing.
+//! open the app's question and answer at once; the user confirms there, and
+//! the yes of `start` frees the server's port as a click does. `open`
+//! starts nothing.
 use super::{Watches, socket, window_for};
 use crate::{
     SheprdWindow,
@@ -15,7 +16,11 @@ use crate::{
     },
 };
 use gpui::{App, Context, Window};
-use std::{cell::RefCell, rc::Rc, time::Duration};
+use std::{cell::RefCell, path::PathBuf, rc::Rc, time::Duration};
+
+// Unix only, as the fake program is a shell script.
+#[cfg(all(test, unix))]
+mod tests;
 
 pub(super) fn serve(
     call: Call<ArtifactsOp>,
@@ -31,13 +36,19 @@ pub(super) fn serve(
     let slot = answer.clone();
     let op = call.op;
     let asked = handle.update(cx, move |view, window, cx| {
-        // Without the program the page is the setting, as the button's.
-        if op == (ArtifactsOp::Open {}) && program_path(cx).is_none() {
-            *slot.borrow_mut() = Some(open_setting(view, window, cx));
+        let Some(program) = program_path(cx) else {
+            // Without the program the page is the setting, as the button's.
+            *slot.borrow_mut() = Some(if op == (ArtifactsOp::Open {}) {
+                open_setting(view, window, cx)
+            } else {
+                failure(&Error::NoProgram)
+            });
             return;
-        }
-        view.read_artifacts_status(window, cx, move |view, status, window, cx| {
-            *slot.borrow_mut() = Some(answer_for(&op, status, view, window, cx));
+        };
+        // The question names the file that answered, and its yes runs it.
+        let read = program.clone();
+        view.read_artifacts_status(read, window, cx, move |view, status, window, cx| {
+            *slot.borrow_mut() = Some(answer_for(&op, status, program, view, window, cx));
         });
     });
     if asked.is_err() {
@@ -69,6 +80,7 @@ fn open_setting(
 fn answer_for(
     op: &ArtifactsOp,
     status: Result<Status>,
+    program: PathBuf,
     view: &mut SheprdWindow,
     window: &mut Window,
     cx: &mut Context<SheprdWindow>,
@@ -92,9 +104,11 @@ fn answer_for(
                 "Nothing to start; the Artifacts button opens {}",
                 url.as_str()
             )),
-            Some(Action::Ask(url)) => {
+            // A command can come from an agent, so unlike the click it
+            // only asks; the user's yes starts the server.
+            Some(Action::Start(url)) => {
                 let address = url.as_str().to_owned();
-                if let Err(not_asked) = view.ask_to_start_artifacts(url, window, cx) {
+                if let Err(not_asked) = view.ask_to_start_artifacts(url, program, window, cx) {
                     return not_asked_response(not_asked);
                 }
                 super::work::bring_forward(window, cx);
@@ -102,12 +116,22 @@ fn answer_for(
                     "Asked to start the artifact server for {address}; nothing starts until the user confirms in Sheprd"
                 ))
             }
+            Some(Action::Restart(url)) => {
+                let address = url.as_str().to_owned();
+                if let Err(not_asked) = view.ask_to_restart_artifacts(url, program, window, cx) {
+                    return not_asked_response(not_asked);
+                }
+                super::work::bring_forward(window, cx);
+                Response::done(format!(
+                    "Asked to restart the artifact server for {address}, which does not answer; nothing restarts until the user confirms in Sheprd"
+                ))
+            }
             Some(Action::Refuse(refusal)) => refused(refusal),
             None => refused(Refusal::NoAddress),
         },
         ArtifactsOp::Off {} => match decide_stop(status.state) {
             Stop::Ask => {
-                if let Err(not_asked) = view.ask_to_stop_artifacts(window, cx) {
+                if let Err(not_asked) = view.ask_to_stop_artifacts(program, window, cx) {
                     return not_asked_response(not_asked);
                 }
                 super::work::bring_forward(window, cx);
@@ -134,9 +158,13 @@ fn open_action(
 ) -> Response {
     match action {
         Some(Action::Open(url)) => opened(url, view, window, cx),
-        Some(Action::Ask(_)) => Response::error(
+        Some(Action::Start(_)) => Response::error(
             ErrorCode::Failed,
             "The artifact server is stopped; sheprd artifacts start asks the user to start it",
+        ),
+        Some(Action::Restart(_)) => Response::error(
+            ErrorCode::Failed,
+            "The artifact server does not answer; sheprd artifacts start asks the user to restart it",
         ),
         Some(Action::Refuse(refusal)) => refused(refusal),
         None => refused(Refusal::NoAddress),
@@ -150,7 +178,7 @@ fn opened(
     cx: &mut Context<SheprdWindow>,
 ) -> Response {
     let address = url.as_str().to_owned();
-    if view.open_artifacts_page(url, window, cx) {
+    if view.open_artifacts_page(url, window, cx).is_some() {
         Response::done(format!("Opened {address}"))
     } else {
         Response::error(

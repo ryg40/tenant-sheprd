@@ -183,6 +183,9 @@ pub(in crate::sidebar) fn agents_group(
     let next = groups
         .after(window.agent_group.as_deref())
         .map(str::to_owned);
+    if window.config.layout.mode.desktop_chrome() {
+        return Some(group_button(window, label, next, cx));
+    }
     Some(
         window
             .chrome_stop(
@@ -202,14 +205,64 @@ pub(in crate::sidebar) fn agents_group(
                 theme.muted
             }))
             .hover(|style| style.text_color(rgb(theme.foreground)))
-            .on_click(cx.listener(move |this, _, _, cx| {
-                cx.stop_propagation();
-                this.agent_group = next.clone();
-                cx.notify();
-            }))
+            .on_click(pick(next, cx))
             .child(label_text(&label)),
     )
 }
+
+/// The group filter as an icon button. Its tooltip names the current
+/// group, and a picked one, which hides agents, is also named beside the
+/// icon.
+fn group_button(
+    window: &SheprdWindow,
+    label: String,
+    next: Option<String>,
+    cx: &mut Context<SheprdWindow>,
+) -> Stateful<Div> {
+    let theme = &window.theme;
+    let name = fl!("sidebar-agents-group", group = label.as_str());
+    let button = crate::chrome_button::icon_button(
+        "agents-group",
+        "icons/fan-out.svg",
+        crate::chrome_button::RADIUS,
+        theme,
+    )
+    .debug_selector(|| "agents-group".into())
+    .tooltip(crate::sidebar::rail::Hint::new(theme).with(name.clone()))
+    .when(window.agent_group.is_some(), |button| {
+        // Wide enough for the name, which gives way first.
+        button
+            .w_auto()
+            .min_w(px(crate::chrome_button::SIZE))
+            .flex_shrink(1.)
+            .px(px(GROUP_PADDING))
+            .gap(px(GROUP_PADDING))
+            .child(
+                div()
+                    .debug_selector(|| "agents-group-name".into())
+                    .min_w_0()
+                    .truncate()
+                    .text_color(rgb(theme.foreground))
+                    .child(label_text(&label)),
+            )
+    });
+    window.sidebar_button(button, name).on_click(pick(next, cx))
+}
+
+/// A click that shows the agents of group `next`, or of every group.
+fn pick(
+    next: Option<String>,
+    cx: &mut Context<SheprdWindow>,
+) -> impl Fn(&ClickEvent, &mut Window, &mut App) + 'static {
+    cx.listener(move |this, _, _, cx| {
+        cx.stop_propagation();
+        this.agent_group = next.clone();
+        cx.notify();
+    })
+}
+
+/// The space around a picked group's icon and name, and between them.
+const GROUP_PADDING: f32 = 4.;
 
 /// A group's name as the header shows it. Names come from the daemon and from
 /// terminals, so they are untrusted: safe, bounded text, and a stand-in for a

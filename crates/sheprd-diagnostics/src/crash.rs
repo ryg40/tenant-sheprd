@@ -7,9 +7,15 @@
 //!
 //! On macOS and Linux a signal such as `SIGSEGV` leaves no report here; the
 //! system's own crash reporter, if any, still sees it.
+//!
+//! A panic on a thread the app [`contain`]s is not a crash of the app, and
+//! gets a log record of its own instead.
 
+mod contained;
 #[cfg(windows)]
 mod windows;
+
+pub use contained::contain;
 
 use std::{
     backtrace::Backtrace,
@@ -39,8 +45,8 @@ pub fn dir() -> Option<PathBuf> {
 }
 
 /// Call once, after [`crate::init`]. The default hook still runs after ours,
-/// so a terminal still sees the panic. Reports name `version` as the build
-/// that crashed.
+/// so a terminal still sees the panic, unless the thread is contained.
+/// Reports name `version` as the build that crashed.
 pub fn install(version: &'static str) {
     let Some(dir) = dir() else {
         return;
@@ -49,6 +55,9 @@ pub fn install(version: &'static str) {
     windows::install(dir.clone(), version);
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
+        if contained::contained(info) {
+            return;
+        }
         record(&dir, version, info);
         previous(info);
     }));

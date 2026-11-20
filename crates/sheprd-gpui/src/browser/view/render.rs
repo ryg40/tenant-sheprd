@@ -98,6 +98,27 @@ impl SheprdWindow {
             .collect()
     }
 
+    /// A button under the line a tab shows in place of its page.
+    pub(in crate::browser) fn placeholder_button(
+        &self,
+        slot: Slot,
+        id: &'static str,
+        label: SharedString,
+    ) -> Stateful<Div> {
+        div()
+            .id(id)
+            .debug_selector(move || slot.selector(id))
+            .px(px(10.))
+            .py(px(2.))
+            .rounded(px(crate::config::corners::CONTROL))
+            .border_1()
+            .border_color(rgb(self.theme.active))
+            .text_color(rgb(self.theme.foreground))
+            .cursor_pointer()
+            .hover(|button| button.bg(rgb(self.theme.active)))
+            .child(label)
+    }
+
     fn toolbar_button(
         &self,
         slot: Slot,
@@ -224,29 +245,27 @@ impl SheprdWindow {
         #[cfg(not(servo_pages))]
         let blank_hint: Option<Div> = None;
         let failure = self.browser.failed.get(&id).cloned();
+        #[cfg(servo_pages)]
+        let reopen = self.stopped_reload(slot, id, cx);
+        #[cfg(not(servo_pages))]
+        let reopen: Option<Stateful<Div>> = None;
+        // A view made again restores the address, not the old history.
+        let history = loaded && reopen.is_none();
         let local = matches!(tab.location, Some(Location::Local { .. }));
         // A local page that shows its source: its page stays, hidden.
         let source = self.browser.file_views.shows_source(tab);
         let file_bar = self.file_bar(slot, tab, cx);
         // A build without pages still shows a local file's source.
         let offer_source = (local && !source && !crate::browser::EMBEDDED).then(|| {
-            div()
-                .id("browser-show-source")
-                .debug_selector(move || slot.selector("browser-show-source"))
-                .px(px(10.))
-                .py(px(2.))
-                .rounded(px(crate::config::corners::CONTROL))
-                .border_1()
-                .border_color(rgb(self.theme.active))
-                .text_color(rgb(self.theme.foreground))
-                .cursor_pointer()
-                .hover(|button| button.bg(rgb(self.theme.active)))
-                .child(fl!("browser-file-show-source"))
+            let label = fl!("browser-file-show-source").into();
+            self.placeholder_button(slot, "browser-show-source", label)
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.show_file_source(id, true, true, window, cx);
                 }))
         });
         let placeholder: SharedString = match (&failure, loaded) {
+            // A page that stopped was shown: its line says so alone.
+            (Some(message), _) if reopen.is_some() => message.clone(),
             (Some(message), _) => fl!("browser-page-failed", error = message.to_string()).into(),
             (None, false) => fl!("browser-page-empty").into(),
             (None, true) if !crate::browser::EMBEDDED && local => {
@@ -271,7 +290,7 @@ impl SheprdWindow {
                 slot,
                 "browser-back",
                 crate::direction::icon("icons/arrow-left.svg"),
-                loaded,
+                history,
                 cx,
                 move |this, _, _| {
                     #[cfg(embedded_pages)]
@@ -284,7 +303,7 @@ impl SheprdWindow {
                 slot,
                 "browser-forward",
                 crate::direction::icon("icons/arrow-right.svg"),
-                loaded,
+                history,
                 cx,
                 move |this, _, _| {
                     #[cfg(embedded_pages)]
@@ -299,8 +318,9 @@ impl SheprdWindow {
                 "icons/refresh.svg",
                 loaded,
                 cx,
-                // A file's source is read again, like its page.
-                move |this, _, cx| this.reload_file_view(id, cx),
+                // A file's source is read again, like its page; a page
+                // that stopped opens again.
+                move |this, window, cx| this.reload_browser_tab(id, window, cx),
             ))
             .child(
                 div()
@@ -370,6 +390,7 @@ impl SheprdWindow {
                         .child(placeholder),
                 )
                 .children(offer_source)
+                .children(reopen)
                 .children(
                     (failure.is_none() && !loaded)
                         .then(|| self.render_blank_ports(slot, id, cx))

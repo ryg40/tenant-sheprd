@@ -669,3 +669,6 @@ mod agent_title;
 
 /// Where the agent buttons draw, and what a click on one starts.
 mod launcher;
+
+/// The desktop layout's strip: pills in the `[ui]` face, and icon buttons.
+mod desktop;

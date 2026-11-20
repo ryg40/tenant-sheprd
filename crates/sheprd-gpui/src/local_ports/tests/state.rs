@@ -57,14 +57,18 @@ fn a_signal_is_sent_once_and_its_outcome_reported() {
         pid: 4242,
         started: 10,
     };
-    ports.signal(PortAction::Stop, vec![victim]).unwrap();
+    let asked = Victim {
+        identity: victim,
+        birth: None,
+    };
+    ports.signal(PortAction::Stop, vec![asked]).unwrap();
     assert_eq!(
         commands.try_recv().unwrap(),
-        Command::Signal(PortAction::Stop, vec![victim])
+        Command::Signal(PortAction::Stop, vec![asked])
     );
     assert!(ports.acting());
     assert!(matches!(
-        ports.signal(PortAction::Pause, vec![victim]),
+        ports.signal(PortAction::Pause, vec![asked]),
         Err(crate::Error::LocalPorts(Error::Busy))
     ));
     let other = Identity {
@@ -95,6 +99,7 @@ fn a_signal_is_sent_once_and_its_outcome_reported() {
             killed: 1,
             gone: 1,
             failed: 1,
+            unidentified: 0,
         })
     );
 }
@@ -128,19 +133,7 @@ fn each_process_is_signalled_once_however_many_ports_it_holds() {
             listener(8080, 4343, 11),
         ],
     };
-    assert_eq!(
-        pending.victims(),
-        vec![
-            Identity {
-                pid: 4242,
-                started: 10
-            },
-            Identity {
-                pid: 4343,
-                started: 11
-            }
-        ]
-    );
+    assert_eq!(pending.victims(), vec![victim(4242, 10), victim(4343, 11)]);
 }
 
 #[test]

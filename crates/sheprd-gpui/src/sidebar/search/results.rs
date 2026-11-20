@@ -25,7 +25,7 @@ impl SheprdWindow {
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
         let theme = &self.theme;
-        let font = &self.config.sidebar;
+        let font = &*self.config.sidebar_font();
         let content_x = look.content_x();
         let mut list = div()
             .id("sidebar-search-results")

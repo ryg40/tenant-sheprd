@@ -26,6 +26,8 @@ struct SavedTab {
     #[serde(default, deserialize_with = "core_location")]
     location: Option<CoreLocation>,
     scope: String,
+    /// A tab saved without one still reads, and has no title.
+    #[serde(default)]
     title: String,
     workspace_id: String,
 }

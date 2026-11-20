@@ -13,7 +13,7 @@ Most of these live in **Settings**, whose Appearance group has Theme, Sidebar, F
 
 **Settings > Theme** shows a large live preview and a searchable grid of theme cards, including every Ghostty theme found on your machine. Clicking a card, or moving through the grid with the arrow keys, applies it at once to every window; there is no Apply button. Only the final choice is saved, when Settings closes or the app quits. The **Ghostty** and **Herdr** filters narrow the grid to one library.
 
-Built-in themes include Default, Nord, Dracula, Catppuccin Mocha, Catppuccin Latte, and popular Ghostty themes such as TokyoNight, Gruvbox Dark, Rose Pine, Atom One Dark, and GitHub Light Default, so they are listed even without Ghostty installed. A theme can also be a Ghostty theme name, an absolute path, or a `~/` path.
+Built-in themes include Default, Nord, Dracula, Catppuccin Mocha, Catppuccin Latte, Sheprd's own Lavender Light, Lavender Gray, Torch Light, and Torch Dark, and popular Ghostty themes such as TokyoNight, Gruvbox Dark, Rose Pine, Atom One Dark, and GitHub Light Default, so they are listed even without Ghostty installed. A theme can also be a Ghostty theme name, an absolute path, or a `~/` path.
 
 ```toml
 theme = "Nord"
@@ -29,6 +29,8 @@ To follow the system's light or dark appearance, name a theme for each side, as 
 ```toml
 theme = "light:Catppuccin Latte,dark:Catppuccin Mocha"
 ```
+
+The Lavender and Torch themes come in pairs made for this, such as `light:Torch Light,dark:Torch Dark`.
 
 ### Other theme sources
 
@@ -85,6 +87,7 @@ size = 12
 ```
 
 - Defaults are Menlo on macOS, Cascadia Mono on Windows, and DejaVu Sans Mono on Linux; the interface uses the system font on macOS and Windows and DejaVu Sans on Linux.
+- The `desktop` layout draws the sidebar and the tabs in the `[ui]` family at 13 px. A `family`, `size`, or `fallback` that you set under `[sidebar]` or `[tabs]` still wins.
 - Nerd Font icons fall back to installed "Nerd Font" families automatically; `fallback` chooses them yourself. With none installed, a pane showing an icon offers a card naming one to install.
 - `padding_x` and `padding_y` keep blank space around the terminal's cells, also under **Settings > Theme > Terminal padding**.
 - `cmd-=`, `cmd--`, and `cmd-0` resize the terminal for this session only, and `sheprd font set NAME` changes the family.
@@ -101,6 +104,7 @@ Pick a layout from **View > Layout** or **Settings > Sidebar > Layout preset**. 
 | `superset` | One line per row, with an icon slot for the PR state or repository owner |
 | `orca` | Inset cards with a status column and a meta line |
 | `minimal` | Only the status dot and the name, for narrow sidebars |
+| `desktop` | A desktop app's sidebar: the `[ui]` font at 13 px, filled rounded rows, chevrons, icon buttons in the headings, and a footer of icon-and-label rows |
 | `devices` | Agents listed under each device, with a search |
 
 Add `-rounded` to `normal`, `compact`, or `comfortable` for inset rows with rounded corners. New installs start with `comfortable-rounded`.
@@ -122,11 +126,13 @@ edge_rail = false
 
 ### Tab layouts
 
-`tab_layout`, or **View > Tab Layout**, sets how tab strips draw: `classic` (the default), `pills`, `outline`, `underline`, `cards`, `curved`, or `compact` (icons only, the chosen tab named).
+`tab_layout`, or **View > Tab Layout**, sets how tab strips draw: `classic` (the default), `pills`, `outline`, `underline`, `cards`, `curved`, or `compact` (icons only, the chosen tab named). The `desktop` layout draws `pills` until you set `tab_layout` or pick a tab layout.
 
 ## Title bar
 
 With Herdr's tab bar at the top (the default), the tab row is the title bar, as in Chrome: the window draws no separate header. The sidebar's first row holds the traffic lights on macOS, the sidebar toggle, and **Back** and **Forward**. The rightmost tab strip ends with the status text, the Git button, your account, and window controls. Every strip keeps empty room after its tabs for dragging the window.
+
+In the `desktop` layout, the sidebar toggle and each strip's split and actions buttons draw as small rounded icon buttons.
 
 **Back** and **Forward** walk the panes you focused, across tabs and workspaces, like a browser; Cmd-[ and Cmd-] and a mouse's side buttons do the same. A bottom tab bar brings back a full-width header.
 

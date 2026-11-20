@@ -44,6 +44,12 @@ fn report_text(report: Report) -> Option<SharedString> {
         (report.killed > 0).then(|| fl!("local-ports-report-killed", count = report.killed)),
         (report.gone > 0).then(|| fl!("local-ports-report-gone", count = report.gone)),
         (report.failed > 0).then(|| fl!("local-ports-report-failed", count = report.failed)),
+        (report.unidentified > 0).then(|| {
+            fl!(
+                "local-ports-report-unidentified",
+                count = report.unidentified
+            )
+        }),
     ]
     .into_iter()
     .flatten()
@@ -118,7 +124,7 @@ impl SheprdWindow {
     pub(super) fn resume_local_port(&mut self, listener: &Listener, cx: &mut Context<Self>) {
         if let Err(error) = self
             .local_ports
-            .signal(PortAction::Resume, vec![listener.identity])
+            .signal(PortAction::Resume, vec![listener.victim()])
         {
             self.local_error = Some(error.localize());
         }

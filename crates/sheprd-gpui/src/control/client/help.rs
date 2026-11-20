@@ -29,6 +29,7 @@ sheprd browser open URL|FILE [--workspace ID] [--no-focus] [--beside|--tab]
     answer then says so.
 sheprd browser reload
     Reload the pages this pane opened, for example after editing the file.
+    A page that stopped opens again; exits 1 when one cannot.
 sheprd browser feedback [--wait SECONDS]
     Print the notes the user sent about this pane's pages and have not been
     delivered yet. With --wait, wait up to SECONDS (at most 600) for them.

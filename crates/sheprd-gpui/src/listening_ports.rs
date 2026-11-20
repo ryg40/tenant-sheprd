@@ -27,10 +27,10 @@ use crate::{
 };
 pub(crate) use render::{chips, close_button};
 pub(crate) use scan::Owner;
+pub(crate) use scan::{Asked, Bind, Bound, Link, Origin, Port, Scan, parse, socket, token};
 // The Ports section's Unix scan reads its addresses the same way.
 #[cfg(unix)]
-pub(crate) use scan::listener;
-pub(crate) use scan::{Asked, Bind, Link, Origin, Port, Scan, parse, socket, token};
+pub(crate) use scan::{bound, listener};
 use sheprd_client::ConnectTarget;
 use std::{
     collections::{HashMap, HashSet},

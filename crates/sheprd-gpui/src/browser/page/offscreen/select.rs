@@ -378,6 +378,11 @@ impl Page {
         self.answer_list(None);
     }
 
+    /// Whether a list of the page is open.
+    pub(super) fn lists(&self) -> bool {
+        self.select.list.borrow().is_some()
+    }
+
     /// Shows the list the engine has for the page, and closes one it no
     /// longer has. Cheap: called as the page lays out.
     fn follow_list(&self) {
@@ -475,31 +480,40 @@ impl Page {
         false
     }
 
-    /// The page's size in points, as the engine was last told.
-    fn points(&self) -> Option<Size<Pixels>> {
+    /// The page's size in points, and its device pixels to a point, as the
+    /// engine was last told.
+    fn points(&self) -> Option<(Size<Pixels>, f32)> {
         let (width, height, scale) = self.sized.get()?;
-        (scale.is_finite() && scale > 0.)
-            .then(|| size(px(width as f32 / scale), px(height as f32 / scale)))
+        (scale.is_finite() && scale > 0.).then(|| {
+            let points = size(px(width as f32 / scale), px(height as f32 / scale));
+            (points, scale)
+        })
     }
 }
 
-/// Where the list's control is, in the page's points. Servo reports the
-/// control's box in CSS pixels of its own document, which is the page's
-/// place for it only in the top document. The press that opened the list
-/// tells the two apart: a box the press is not in belongs to a frame, and
-/// the list opens under the press instead.
-fn control(menu: &Menu, zoom: f32, press: Option<Point<Pixels>>) -> Bounds<Pixels> {
+/// Where the list's control is, in the points of a page of `scale` device
+/// pixels to a point. Servo reports the control's box in the page's device
+/// pixels, with the page's zoom, its scroll, and the frames around the
+/// control applied, and cut to the page. A box with no size is one Servo
+/// could not place: the list then opens under the press that opened it.
+/// A box with a size is used as it is, also far from that press: a page
+/// can move the control during the press. Servo does not say when it
+/// placed a box with a part of its frames only, so such a box is not
+/// told apart.
+fn control(menu: &Menu, scale: f32, press: Option<Point<Pixels>>) -> Bounds<Pixels> {
     #[expect(clippy::cast_precision_loss, reason = "a place on a page is small")]
-    let [left, top, width, height] = menu.control.map(|css| css as f32 * zoom);
+    let [left, top, width, height] = menu.control.map(|device| device as f32 / scale);
     let reported = Bounds::new(
         point(px(left), px(top)),
         size(px(width.max(0.)), px(height.max(0.))),
     );
     match press {
-        Some(press) if !reported.contains(&press) => Bounds::new(
-            point(press.x, press.y + px(UNDER_PRESS)),
-            size(px(0.), px(0.)),
-        ),
+        Some(press) if reported.size.width <= px(0.) || reported.size.height <= px(0.) => {
+            Bounds::new(
+                point(press.x, press.y + px(UNDER_PRESS)),
+                size(px(0.), px(0.)),
+            )
+        }
         _ => reported,
     }
 }
@@ -581,14 +595,13 @@ pub(super) fn element(page: &Rc<Page>, colors: Colors) -> Option<impl IntoElemen
     let (number, count, bounds, scroll) = {
         let list = page.select.list.borrow();
         let list = list.as_ref()?;
-        #[expect(clippy::cast_possible_truncation, reason = "a zoom factor is small")]
-        let zoom = page.zoom.get().factor() as f32;
-        let control = control(&list.menu, zoom, page.select.press.get());
+        let (points, scale) = page.points()?;
+        let control = control(&list.menu, scale, page.select.press.get());
         let count = list.menu.rows.len();
         (
             list.menu.number,
             count,
-            place(control, page.points()?, count),
+            place(control, points, count),
             list.scroll.clone(),
         )
     };

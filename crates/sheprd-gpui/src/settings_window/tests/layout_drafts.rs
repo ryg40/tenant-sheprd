@@ -21,6 +21,7 @@ fn layout_clicks_apply_live_without_writing_and_close_commits_only_final(cx: &mu
     for (mode, selector) in [
         (LayoutMode::Orca, "sidebar-layout-control-option-7"),
         (LayoutMode::Minimal, "sidebar-layout-control-option-8"),
+        (LayoutMode::Desktop, "sidebar-layout-control-option-9"),
         (LayoutMode::Superset, "sidebar-layout-control-option-6"),
     ] {
         assert_eq!(

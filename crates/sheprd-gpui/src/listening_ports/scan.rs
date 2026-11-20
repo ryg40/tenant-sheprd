@@ -242,22 +242,83 @@ pub(crate) enum Bind {
     Any,
 }
 
+/// The address a socket is bound to, as the listing printed it: what
+/// [`Bind`] classes, kept for the question of which socket holds one
+/// endpoint.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Bound {
+    // keep-sorted start
+    /// One address, which may be a family's wildcard, `0.0.0.0` or `::`.
+    Address(IpAddr),
+    /// `*`, every address. `ss` prints it for an IPv6 socket that takes
+    /// IPv4 connections too, and `[::]` for one that does not; `lsof`
+    /// prints it for the wildcard of either family, without saying which.
+    Every,
+    // keep-sorted end
+}
+
+impl Bound {
+    fn parse(host: &str) -> Option<Self> {
+        // `ss` names the device a socket is bound to, or the interface of
+        // a link-scoped address, after the address and so after its
+        // brackets: `127.0.0.1%lo`, `*%lo`, `[::ffff:127.0.0.1]%lo`,
+        // `[fe80::1]%eth0`. A zone can also stand inside them:
+        // `[fe80::1%eth0]`. Neither changes which address it is, nor
+        // whether another socket can be bound to it. A name that is there
+        // must be a name: `[::1]%` is no address.
+        let named = |name: &str| !name.is_empty();
+        let host = match host.strip_prefix('[') {
+            Some(rest) => {
+                let (inner, after) = rest.split_once(']')?;
+                if !(after.is_empty() || after.strip_prefix('%').is_some_and(named)) {
+                    return None;
+                }
+                inner
+            }
+            None => host,
+        };
+        let host = match host.split_once('%') {
+            Some((address, name)) if named(name) => address,
+            Some(_) => return None,
+            None => host,
+        };
+        if host == "*" {
+            return Some(Self::Every);
+        }
+        host.parse().ok().map(Self::Address)
+    }
+
+    /// Whether a socket bound here holds `endpoint`, so that it would make
+    /// a bind of `endpoint` fail: the same address, the wildcard of its
+    /// family, or `*`. Another address of the loopback network does not,
+    /// nor does IPv6's loopback or its wildcard hold IPv4's. An IPv4
+    /// address written as IPv6 (`::ffff:127.0.0.1`) counts as that IPv4
+    /// address. The device a socket is bound to does not count: a socket
+    /// bound to another device (`0.0.0.0%eth0`) takes no connection to the
+    /// loopback, but the bind fails beside it all the same.
+    pub(crate) fn holds(self, endpoint: IpAddr) -> bool {
+        let Self::Address(address) = self else {
+            return true;
+        };
+        let (address, endpoint) = (address.to_canonical(), endpoint.to_canonical());
+        address == endpoint || (address.is_unspecified() && address.is_ipv4() == endpoint.is_ipv4())
+    }
+}
+
+impl From<Bound> for Bind {
+    fn from(bound: Bound) -> Self {
+        match bound {
+            Bound::Every => Self::Any,
+            Bound::Address(address) if address.is_unspecified() => Self::Any,
+            Bound::Address(address) if address.is_loopback() => Self::Loopback,
+            Bound::Address(address) => Self::Address(address),
+        }
+    }
+}
+
 impl Bind {
     pub(crate) fn parse(host: &str) -> Option<Self> {
-        let host = host.trim_start_matches('[').trim_end_matches(']');
-        // `ss` names the interface of a link-scoped address: `fe80::1%eth0`.
-        let host = host.split('%').next().unwrap_or(host);
-        if host == "*" {
-            return Some(Self::Any);
-        }
-        let address: IpAddr = host.parse().ok()?;
-        Some(if address.is_unspecified() {
-            Self::Any
-        } else if address.is_loopback() {
-            Self::Loopback
-        } else {
-            Self::Address(address)
-        })
+        Bound::parse(host).map(Self::from)
     }
 
     /// Which of two sockets on one port to keep: the one reachable from more
@@ -492,6 +553,13 @@ pub(crate) fn token(text: &str) -> bool {
     !text.is_empty()
         && text.len() <= MAX_WORKSPACE_ID
         && text.chars().all(|c| c.is_ascii_graphic() && c != '=')
+}
+
+/// The address of `127.0.0.1:3000`, `[::1]:3000`, `*%lo:3000`, as printed.
+/// Only the Ports section's scan asks, and it runs on Unix.
+#[cfg(unix)]
+pub(crate) fn bound(address: &str) -> Option<Bound> {
+    Bound::parse(address.rsplit_once(':')?.0)
 }
 
 /// `127.0.0.1:3000`, `[::1]:3000`, `*:3000`, `0.0.0.0:3000`.

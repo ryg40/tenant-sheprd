@@ -96,7 +96,17 @@ fn nothing_listening_says_so(cx: &mut gpui::TestAppContext) {
 
 #[gpui::test]
 fn stopping_asks_first_and_signals_only_once_confirmed(cx: &mut gpui::TestAppContext) {
-    let (view, cx, channels) = fixture(cx, vec![listener(3000, 4242, 10)]);
+    // The row's fine start is not its start in seconds, and must reach
+    // the command as listed.
+    let row = Listener {
+        birth: Some(Birth(8_675_309)),
+        ..listener(3000, 4242, 10)
+    };
+    let asked = Victim {
+        identity: row.identity,
+        birth: Some(Birth(8_675_309)),
+    };
+    let (view, cx, channels) = fixture(cx, vec![row]);
     let stop = cx.debug_bounds("local-port-0-stop").unwrap().center();
     cx.simulate_click(stop, Modifiers::default());
     redraw(cx);
@@ -115,13 +125,7 @@ fn stopping_asks_first_and_signals_only_once_confirmed(cx: &mut gpui::TestAppCon
     cx.simulate_click(confirm, Modifiers::default());
     assert_eq!(
         channels.commands.try_recv().unwrap(),
-        Command::Signal(
-            PortAction::Stop,
-            vec![Identity {
-                pid: 4242,
-                started: 10
-            }]
-        )
+        Command::Signal(PortAction::Stop, vec![asked])
     );
     assert!(view.read_with(cx, |v, _| v.menu.page.is_none() && v.local_ports.acting()));
 }
@@ -136,13 +140,7 @@ fn resuming_needs_no_question(cx: &mut gpui::TestAppContext) {
     assert!(view.read_with(cx, |v, _| v.menu.page.is_none()));
     assert_eq!(
         channels.commands.try_recv().unwrap(),
-        Command::Signal(
-            PortAction::Resume,
-            vec![Identity {
-                pid: 4242,
-                started: 10
-            }]
-        )
+        Command::Signal(PortAction::Resume, vec![victim(4242, 10)])
     );
 }
 

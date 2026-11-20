@@ -208,22 +208,26 @@ fn a_list_stays_inside_its_page_whatever_the_page_reports() {
 }
 
 #[test]
-fn a_control_in_a_frame_gets_its_list_under_the_press() {
-    let menu = Menu {
+fn a_list_opens_at_the_box_servo_reports_and_under_the_press_without_one() {
+    let menu = |control| Menu {
         number: 1,
-        control: [10, 20, 100, 20],
+        control,
         rows: Vec::new(),
         chosen: Vec::new(),
         multiple: false,
     };
-    // The press is in the box Servo reports, at the page's zoom.
-    let top = control(&menu, 2., Some(point(px(30.), px(50.))));
-    assert_eq!(top, rect(20., 40., 200., 40.));
-    assert_eq!(control(&menu, 1., None), rect(10., 20., 100., 20.));
-    // The press is elsewhere: the box is a frame's own.
-    let framed = control(&menu, 1., Some(point(px(400.), px(300.))));
-    assert_eq!(framed.left(), px(400.));
-    assert!(framed.top() > px(300.));
+    // Servo's box is in device pixels, with the zoom and the frames applied:
+    // at two pixels a point it is half as large in points, wherever the
+    // press was.
+    let reported = menu([20, 40, 200, 40]);
+    let at = rect(10., 20., 100., 20.);
+    assert_eq!(control(&reported, 2., Some(point(px(15.), px(25.)))), at);
+    assert_eq!(control(&reported, 2., Some(point(px(400.), px(300.)))), at);
+    assert_eq!(control(&reported, 2., None), at);
+    // A box with no size is one Servo could not place.
+    let unplaced = control(&menu([0, 0, 0, 0]), 2., Some(point(px(400.), px(300.))));
+    assert_eq!(unplaced.left(), px(400.));
+    assert!(unplaced.top() > px(300.));
 }
 
 #[test]

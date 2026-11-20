@@ -335,6 +335,14 @@ impl Tunnels {
         open || opening
     }
 
+    /// Closes each open tunnel that forwards `local` here, as
+    /// [`Tunnels::close`] does. Returns whether any closed.
+    pub(crate) fn close_local(&mut self, local: u16) -> bool {
+        let before = self.open.len();
+        self.open.retain(|_, tunnel| tunnel.local != local);
+        self.open.len() != before
+    }
+
     /// Records a failed attempt. Returns whether anyone still wanted it: not
     /// when the user closed the port meanwhile, which needs no complaint.
     pub(crate) fn fail(&mut self, key: &Key) -> bool {

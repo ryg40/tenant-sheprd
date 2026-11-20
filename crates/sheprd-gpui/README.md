@@ -941,9 +941,11 @@ preserves these drafts. Theme, font, and layout writes from Settings are seriali
 **Ghostty** and **Herdr** are independent library filters, both enabled initially.
 Turn either off to show only the other; search text is preserved, and changing a
 filter does not change the live theme or pending draft. Ghostty includes native
-built-ins and theme files. The built-ins bundle popular Ghostty themes from
-iTerm2-Color-Schemes under their Ghostty names, so a platform without Ghostty
-still lists them; when Ghostty is installed, its copy of a built-in, including
+built-ins and theme files. The built-ins hold Sheprd's own Lavender pair
+(`Lavender Light`, `Lavender Gray`) and its own Torch pair (`Torch Light`,
+`Torch Dark`), and bundle popular Ghostty themes from iTerm2-Color-Schemes
+under their Ghostty names, so a platform without Ghostty still lists them;
+when Ghostty is installed, its copy of a built-in, including
 an older spelling such as `tokyonight` or `catppuccin-mocha`, is listed once,
 as the built-in. A theme saved under such a spelling stays listed and loads
 from its file. Every card identifies its source, including themes
@@ -1510,6 +1512,24 @@ spacing:
   differs from the name, and the pull request. Agents are single compact lines.
 - `minimal`: one line per row with only the status dot and the name, for narrow
   sidebars or long lists.
+
+The `desktop` layout draws Herdr's rows as a desktop app's sidebar. Text
+takes the proportional `[ui]` family at 13 px, with second lines a pixel
+smaller; a `[sidebar] family`, `size`, or `fallback` in your own config file
+still wins. Rows are about 30 px tall with a filled, rounded highlight,
+headings are in title case, and rows that fold show chevrons. A line of
+several parts, such as an agent's place, shrinks and truncates each part at
+its real width. The spacing keys under `[sidebar]` apply as they do to the
+densities.
+
+Its controls are icon buttons rather than lowercase links. The Spaces heading
+ends in `+` (a new workspace) and `…` (the menu), which take the place of
+`new` and `menu` under the list. The Agents heading ends in a sort button and,
+when coordinator groups exist, a group button; their tooltips name the current
+sort and group, and a picked group's name also shows beside its icon. The
+footer is a row for the devices (the device or All Devices, the host count,
+and the connection dot) and a Settings row, which the activity bar's own
+Settings button replaces while the bar is shown.
 
 The `devices` layout lists agents by device instead of workspaces. Every
 device gets a header, even when there is only one, with its connection dot
@@ -2562,9 +2582,17 @@ button over Settings. The button also shows without the setting when the
 user's `artifacts` program is installed. The program is not part of Sheprd
 ([its contract](../../docs/cli.md#the-artifacts-program)), and Sheprd looks
 for it on `PATH`, then in `~/.local/bin`, on Linux and macOS only. With the program, a click reads its status first: a
-server that answers opens its page, and a stopped local server opens a
-question that names the page and the program file; Sheprd starts the server
-only after **Start**, never by itself, and leaves it running when it quits.
+server that answers opens its page, and a stopped local server starts with
+`artifacts start`, without a question, and then opens its page. A local
+server that runs but does not answer gets `artifacts off` before that start.
+A start first takes the page's loopback port back: a forward or tunnel that
+a Sheprd window holds on it stops at once, and any other process that
+listens on it gets the Ports section's stop question, whose yes goes on to
+the start.
+`sheprd artifacts start` asks first, in a question that names the page and
+the program file. Sheprd never starts the server without a click or that
+yes, never stops another program without a yes, and leaves the server
+running when it quits.
 A set `url` wins: unless the program's page has its origin, or when the
 program gives no answer, the click opens `url` as before. A loopback address
 such as `http://127.0.0.1:6790/` is the computer where Sheprd runs. The page
@@ -3289,7 +3317,9 @@ closed to other users; `sheprd browser clear-data` asks to remove it
   Pages cannot navigate to other schemes
   (so `file:` and applications' custom URL schemes stay closed), downloads are
   refused, and a page's new windows open as new browser tabs (a Linux build
-  with the `servo` feature refuses them: the link does nothing). The only
+  with the `servo` feature opens one only within 2 s of a press or a key of
+  the user in that page, for the document that got it, whose scripts can
+  use it in that time, a timer too, and refuses the others). The only
   messages a page can send the app are annotation picks, which fill a draft
   note and nothing else, and its icon, which shows on its tab; the app runs
   only its own scripts in pages. On
@@ -3317,8 +3347,9 @@ closed to other users; `sheprd browser clear-data` asks to remove it
   are unavailable. A
   build with the `servo` cargo feature shows web addresses and local files
   in tabs, drawn by Servo inside the app's own process, so a page that
-  crashes the engine ends the app. It has no clipboard, input method, or
-  note screenshots yet; see [the plan](../../docs/linux-browser-plan.md).
+  crashes the engine ends the app. Copy and paste of text work there; it
+  has no input method or note screenshots yet; see
+  [the plan](../../docs/linux-browser-plan.md).
 
 ### Annotating A Page
 

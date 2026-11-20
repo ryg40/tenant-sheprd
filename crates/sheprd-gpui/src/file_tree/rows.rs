@@ -3,7 +3,7 @@
 use super::Folder;
 use crate::browser::file_view::{is_markdown, renders};
 use gpui::SharedString;
-use sheprd_vcs::file_tree::Kind;
+use sheprd_vcs::file_tree::{Kind, Omitted};
 use std::{
     collections::{BTreeSet, HashMap},
     path::Path,
@@ -46,8 +46,10 @@ pub(super) enum What {
     Link,
     /// A socket, FIFO, or device.
     Other,
-    /// The folder holds more than is listed.
-    More,
+    /// The folder holds more than is listed: this many more.
+    More(Omitted),
+    /// The tree has more rows than are prepared.
+    Cut,
     Loading,
     Failed(String),
 }
@@ -69,7 +71,7 @@ pub(super) fn tree(folders: &HashMap<String, Folder>, expanded: &BTreeSet<String
     push_folder(&mut rows, folders, expanded, "", 0);
     if rows.len() >= MAX_ROWS {
         // The rows cut off are not shown; the tree says so at its end.
-        rows.push(note("\u{0}", 0, What::More));
+        rows.push(note("\u{0}", 0, What::Cut));
     }
     rows
 }
@@ -125,8 +127,8 @@ fn push_folder(
             push_folder(rows, folders, expanded, &path, depth + 1);
         }
     }
-    if listing.more {
-        rows.push(note(folder, depth, What::More));
+    if listing.omitted.any() {
+        rows.push(note(folder, depth, What::More(listing.omitted)));
     }
 }
 

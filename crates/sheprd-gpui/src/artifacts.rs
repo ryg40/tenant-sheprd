@@ -2,12 +2,19 @@
 //! with the user's `artifacts` program installed (`program::locate`), the
 //! activity bar shows an Artifacts button. With the program, a click reads
 //! `artifacts --json status` on a background thread first: a server that
-//! answers opens its page, a stopped local server asks the user to start it
-//! (`menu/artifacts.rs`), anything else flashes why. A `url` the program does
-//! not serve, and a program that gives no answer, leave the click to open
-//! `url` as before (`decide`). Without the program a click opens `url`. Sheprd starts or stops the server only after
-//! the user confirms, never by itself, and leaves it running when it quits.
-//! `WebUrl` already refuses anything but http and https.
+//! answers opens its page, a stopped local server is started with
+//! `artifacts start` and then opens its page, a local server that holds on
+//! but does not answer gets `artifacts off` before that start, and anything
+//! else flashes why. Before a start, the port of the page is taken back
+//! from whatever listens on it (`port`): the app's own forwards at once, any
+//! other program only after the Ports question's yes. A `url` the program
+//! does not serve, and a program that gives no answer, leave the click to
+//! open `url` as before (`decide`). Without the program a click opens
+//! `url`. `sheprd artifacts start` and `off` only ask (`menu/artifacts.rs`).
+//! Sheprd starts the server only on a click of the button or a yes to that
+//! question, stops it only on such a click or after a yes, and leaves it
+//! running when it quits. `WebUrl` already refuses anything but http and
+//! https.
 use crate::browser::WebUrl;
 use gpui::{App, Global};
 pub(crate) use sheprd_control_protocol::protocol::artifacts::State;
@@ -15,13 +22,15 @@ use std::path::PathBuf;
 
 mod error;
 mod launch;
+mod port;
 pub(crate) mod program;
 
 pub(crate) use error::Error;
+pub(crate) use port::Freeing;
 pub(crate) type Result<T, E = Error> = std::result::Result<T, E>;
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -46,13 +55,19 @@ impl Status {
 }
 
 /// What a click or `sheprd artifacts start` does with a status answer.
-/// No action starts the server: [`Action::Ask`] only asks the user.
+/// The caller chooses how [`Action::Start`] and [`Action::Restart`] run:
+/// the click runs them at once, the command only asks the user, and
+/// `sheprd artifacts open` starts nothing.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Action {
     /// The server answers: open its page.
     Open(WebUrl),
-    /// A local server is configured and stopped: ask to start it.
-    Ask(WebUrl),
+    /// A local server is configured and stopped: start it, then open this
+    /// page.
+    Start(WebUrl),
+    /// The program's local server holds on but does not answer: stop it
+    /// with `off`, start it, then open this page.
+    Restart(WebUrl),
     /// Nothing can open: say why.
     Refuse(Refusal),
 }
@@ -74,13 +89,14 @@ pub(crate) enum Refusal {
 pub(crate) fn decide(status: Option<&Status>, config: &Config) -> Option<Action> {
     if let Some(setting) = &config.url {
         let program_decides = status.is_some_and(|status| {
-            matches!(
+            (matches!(
                 status.state,
                 State::Running | State::Remote | State::Stopped
-            ) && status
-                .url
-                .as_ref()
-                .is_some_and(|url| same_server(url, setting))
+            ) || restarts(status))
+                && status
+                    .url
+                    .as_ref()
+                    .is_some_and(|url| same_server(url, setting))
         });
         if !program_decides {
             return Some(Action::Open(setting.clone()));
@@ -88,22 +104,40 @@ pub(crate) fn decide(status: Option<&Status>, config: &Config) -> Option<Action>
     }
     let status = status?;
     Some(match (status.state, status.page(config)) {
+        (State::Unreachable, Some(url)) if restarts(status) => Action::Restart(url),
         (State::Unreachable, _) => Action::Refuse(Refusal::Unreachable),
         (State::Unconfigured, _) => Action::Refuse(Refusal::Unconfigured),
         (_, None) => Action::Refuse(Refusal::NoAddress),
         (State::Running | State::Remote, Some(url)) => Action::Open(url),
-        (State::Stopped, Some(url)) => Action::Ask(url),
+        (State::Stopped, Some(url)) => Action::Start(url),
     })
 }
 
+/// Whether `status` is the program's own local server holding on without
+/// an answer: `unreachable` at a loopback page. An `unreachable` page on
+/// another machine is a remote server, which `off` and `start` leave alone.
+fn restarts(status: &Status) -> bool {
+    status.state == State::Unreachable
+        && status
+            .url
+            .as_ref()
+            .is_some_and(|url| url.loopback_port().is_some())
+}
+
 /// What `sheprd artifacts start` does with a status answer: the click's
-/// rule, except that a stopped local server is always asked about, also
-/// when the setting names another server, since the user named `start`.
-/// The question then names the program's page, the server a yes starts.
+/// rule, except that a stopped or unanswering local server is always asked
+/// about, also when the setting names another server, since the user named
+/// `start`. The question then names the program's page, the server a yes
+/// starts.
 pub(crate) fn decide_start(status: &Status, config: &Config) -> Option<Action> {
     match (status.state, &status.url, &config.url) {
         (State::Stopped, Some(page), Some(setting)) if !same_server(page, setting) => {
-            Some(Action::Ask(page.clone()))
+            Some(Action::Start(page.clone()))
+        }
+        (State::Unreachable, Some(page), Some(setting))
+            if restarts(status) && !same_server(page, setting) =>
+        {
+            Some(Action::Restart(page.clone()))
         }
         _ => decide(Some(status), config),
     }
@@ -114,7 +148,8 @@ pub(crate) fn decide_start(status: &Status, config: &Config) -> Option<Action> {
 pub(crate) enum NotAsked {
     /// Another page or dialog holds the window.
     DialogOpen,
-    /// The program is no longer found, as after a config reload.
+    /// The program is no longer found, or is another file than the one
+    /// that answered the status, as after a config reload.
     NoProgram,
 }
 
@@ -160,6 +195,9 @@ pub(crate) fn decide_stop(state: State) -> Stop {
 pub(crate) enum Ask {
     /// Start the local server, then open this page.
     Start(WebUrl),
+    /// Stop the local server that does not answer, start it, then open this
+    /// page.
+    Restart(WebUrl),
     /// Stop each local server.
     Stop,
 }
@@ -202,6 +240,13 @@ pub(crate) fn shown(config: &Config, cx: &App) -> bool {
 
 pub(crate) fn program_path(cx: &App) -> Option<PathBuf> {
     cx.try_global::<Launcher>()?.program.clone()
+}
+
+/// Puts `program` in place as the found program, for tests outside the
+/// module, as `find_program` would.
+#[cfg(test)]
+pub(crate) fn found_for_test(program: PathBuf, cx: &mut App) {
+    cx.default_global::<Launcher>().program = Some(program);
 }
 
 /// Whether a child of the program runs, for the button's busy pulse.

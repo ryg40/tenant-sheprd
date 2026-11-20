@@ -88,7 +88,14 @@ wry                  = { package = "lb-wry", version = "=0.53.3" }
 # (`browser::page`): offscreen, into a GPUI image. No WebGL, WebGPU, media,
 # devtools, or multiprocess; the clipboard is the app's own.
 # `subtlecrypto` gives secure pages `crypto.subtle`, which sign-in pages use.
-servo                = { default-features = false, features = ["baked-in-resources", "bundled_freetype", "js_jit", "subtlecrypto"], version = "=0.8.0" }
+# An unreleased commit of Servo's main branch (2026-11-19), ahead of 0.9.0,
+# for fixes 0.8.0 lacks: no panic in `IntersectionObserver` for a frame
+# without a padding box, `rsa` 0.10.0 in place of a release candidate, and
+# `<select>` boxes placed with frames and zoom. Main still says 0.8.0, which
+# the version holds so the requirement is not a wildcard. It takes `stylo`
+# from git too (deny.toml's `allow-git`). Go back to crates.io with
+# `version = "=0.9.0"` once it is published, and remove those entries.
+servo                = { default-features = false, features = ["baked-in-resources", "bundled_freetype", "js_jit", "subtlecrypto"], git = "https://github.com/servo/servo", rev = "1879c93bb85a45b41d6ade5820407eb70f5bc7ef", version = "0.8.0" }
 # Servo's geometry types, at the versions it uses.
 dpi                  = "0.1.2"
 euclid               = "0.22"

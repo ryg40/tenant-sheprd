@@ -96,6 +96,8 @@ pub(crate) struct MenuState {
     pub(super) open_link: Option<crate::terminal::ExternalUrl>,
     /// The signal the Ports question is about.
     pub(super) port_signal: Option<crate::local_ports::Pending>,
+    /// The artifact server start a yes to the Ports question goes on to.
+    pub(super) port_signal_start: Option<crate::artifacts::Freeing>,
     /// The batch the destroy-cloud-devices question is about. Dropping it
     /// unanswered cancels the batch.
     /// The batch the create-cloud-machines question is about.
@@ -377,6 +379,7 @@ impl MenuState {
             artifacts: None,
             open_link: None,
             port_signal: None,
+            port_signal_start: None,
             #[cfg(feature = "cloud")]
             cloud_create: None,
             #[cfg(feature = "cloud")]
@@ -464,6 +467,7 @@ impl MenuState {
         self.artifacts = None;
         self.open_link = None;
         self.port_signal = None;
+        self.port_signal_start = None;
         #[cfg(feature = "cloud")]
         {
             self.cloud_create = None;

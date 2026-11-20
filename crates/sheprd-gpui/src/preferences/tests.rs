@@ -53,6 +53,7 @@ fn roundtrip_and_reset_drain_after_drop() {
             activity_panel: None,
             agent_sort: Some(AgentSort::Priority),
             device_order: Vec::new(),
+            file_tree_width: Some(360.),
             kanban_lane_order: Vec::new(),
             kanban_ranks: Default::default(),
             mod_panel_width: None,
@@ -76,6 +77,7 @@ fn roundtrip_and_reset_drain_after_drop() {
             activity_panel: None,
             agent_sort: Some(AgentSort::Priority),
             device_order: Vec::new(),
+            file_tree_width: Some(360.),
             kanban_lane_order: Vec::new(),
             kanban_ranks: Default::default(),
             mod_panel_width: None,
@@ -106,6 +108,7 @@ fn only_a_toggled_sort_is_stored_and_older_files_migrate() {
         activity_panel: None,
         agent_sort,
         device_order: Vec::new(),
+        file_tree_width: None,
         kanban_lane_order: Vec::new(),
         kanban_ranks: Default::default(),
         mod_panel_width: None,
@@ -193,6 +196,7 @@ fn drop_does_not_wait_for_blocked_worker_and_queued_saves_still_drain() {
             activity_panel: None,
             agent_sort: Some(AgentSort::Grouped),
             device_order: Vec::new(),
+            file_tree_width: None,
             kanban_lane_order: Vec::new(),
             kanban_ranks: Default::default(),
             mod_panel_width: None,
@@ -208,6 +212,7 @@ fn drop_does_not_wait_for_blocked_worker_and_queued_saves_still_drain() {
             activity_panel: None,
             agent_sort: Some(AgentSort::Priority),
             device_order: Vec::new(),
+            file_tree_width: None,
             kanban_lane_order: Vec::new(),
             kanban_ranks: Default::default(),
             mod_panel_width: None,
@@ -335,6 +340,7 @@ fn malformed_and_invalid_widths_fall_back_to_default(cx: &mut TestAppContext) {
                     activity_panel: None,
                     agent_sort: None,
                     device_order: Vec::new(),
+                    file_tree_width: None,
                     kanban_lane_order: Vec::new(),
                     kanban_ranks: Default::default(),
                     mod_panel_width: None,
@@ -354,6 +360,7 @@ fn malformed_and_invalid_widths_fall_back_to_default(cx: &mut TestAppContext) {
         activity_panel: None,
         agent_sort: None,
         device_order: Vec::new(),
+        file_tree_width: None,
         kanban_lane_order: Vec::new(),
         kanban_ranks: Default::default(),
         mod_panel_width: None,
@@ -378,6 +385,7 @@ fn invalid_sidebar_splits_preserve_other_preferences() {
         activity_panel: None,
         agent_sort: Some(AgentSort::Priority),
         device_order: Vec::new(),
+        file_tree_width: None,
         kanban_lane_order: Vec::new(),
         kanban_ranks: Default::default(),
         mod_panel_width: None,
@@ -430,6 +438,7 @@ fn sidebar_split_roundtrips_including_boundaries_and_reset() {
             activity_panel: None,
             agent_sort: Some(AgentSort::Priority),
             device_order: Vec::new(),
+            file_tree_width: None,
             kanban_lane_order: Vec::new(),
             kanban_ranks: Default::default(),
             mod_panel_width: None,
@@ -467,6 +476,7 @@ fn endpoint_paths_use_stable_fnv1a() {
 mod activity_last_opened;
 mod activity_panel;
 mod device_order;
+mod file_tree_width;
 mod notes_width;
 mod walkr_dismissed;
 

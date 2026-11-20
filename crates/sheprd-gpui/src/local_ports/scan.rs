@@ -5,7 +5,7 @@
 //! never come back with a pid and are dropped here. The script names the
 //! tool it ran on its first line, so the parser never guesses a format.
 
-use crate::listening_ports::{Bind, listener};
+use crate::listening_ports::{Bind, Bound, bound, listener};
 
 /// Socket lines read from one answer; the rest are ignored.
 pub(super) const MAX_SOCKETS: usize = 1024;
@@ -44,14 +44,16 @@ pub(crate) struct Socket {
     pub pid: u32,
     pub number: u16,
     pub bind: Bind,
+    /// Each address the process listens on at this number, as printed.
+    pub bound: Vec<Bound>,
     /// The tool's name for the process, bounded display text.
     pub process: String,
 }
 
 /// What [`SCRIPT`] printed, as sockets, or `None` when the computer has
 /// neither tool. Each process's IPv4 and IPv6 sockets on one number are one
-/// row, kept at the wider of the two binds; the result is sorted by port,
-/// then pid.
+/// row, kept at the wider of the two binds and with the address of each;
+/// the result is sorted by port, then pid.
 pub(crate) fn parse(text: &str) -> Option<Vec<Socket>> {
     let mut lines = text.lines();
     let mut sockets = match lines.next().map(str::trim) {
@@ -64,7 +66,13 @@ pub(crate) fn parse(text: &str) -> Option<Vec<Socket>> {
             .cmp(&(b.number, b.pid))
             .then(b.bind.reach().cmp(&a.bind.reach()))
     });
-    sockets.dedup_by(|later, kept| later.number == kept.number && later.pid == kept.pid);
+    sockets.dedup_by(|later, kept| {
+        let same = later.number == kept.number && later.pid == kept.pid;
+        if same {
+            kept.bound.append(&mut later.bound);
+        }
+        same
+    });
     Some(sockets)
 }
 
@@ -75,6 +83,7 @@ fn socket(pid: &str, address: &str, process: &str) -> Option<Socket> {
         pid,
         number: port.number,
         bind: port.bind,
+        bound: bound(address).into_iter().collect(),
         process: port.process,
     })
 }

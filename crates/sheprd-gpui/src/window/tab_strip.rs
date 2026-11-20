@@ -5,6 +5,7 @@
 
 mod agent_title;
 mod curved;
+mod desktop;
 mod dividers;
 mod launcher;
 
@@ -40,16 +41,16 @@ const THUMB_ALPHA: u32 = 0x80;
 const THUMB_HELD_ALPHA: u32 = 0xc0;
 
 impl SheprdWindow {
-    /// The layout View > Tab Layout picked.
+    /// The layout View > Tab Layout picked, or the desktop layout's.
     pub(crate) fn tab_layout(&self) -> &'static dyn TabLayout {
-        crate::tab_layout::layout_for(self.config.tab_layout)
+        crate::tab_layout::layout_for(self.config.tab_layout_in_use())
     }
 
     /// What every tab of `slot`'s strip shares.
     pub(crate) fn tab_context(&self, slot: Slot, indicators: Indicators) -> TabContext<'_> {
         TabContext {
             theme: &self.theme,
-            font: &self.config.tabs,
+            font: self.config.tabs_font(),
             indicators,
             fill: self.fill(),
             slot,
@@ -82,9 +83,10 @@ impl SheprdWindow {
         indicators: Indicators,
         window: &Window,
     ) -> f32 {
+        let tabs = self.config.tabs_font();
         let run = TextRun {
             len: label.len(),
-            font: self.config.tabs.font(),
+            font: tabs.font(),
             color: black(),
             background_color: None,
             underline: None,
@@ -93,12 +95,12 @@ impl SheprdWindow {
         let text = f32::from(
             window
                 .text_system()
-                .shape_line(label.clone(), px(self.config.tabs.size), &[run], None)
+                .shape_line(label.clone(), px(tabs.size), &[run], None)
                 .width,
         );
         // GPUI rounds the text element's intrinsic width up during layout.
         self.tab_layout()
-            .width(text.ceil(), shape, &self.config.tabs, indicators)
+            .width(text.ceil(), shape, &tabs, indicators)
     }
 
     /// A closed tab where it stood, narrowing and fading out.
@@ -126,7 +128,7 @@ impl SheprdWindow {
     /// Height of a group's tab strip, which grows with the tab font.
     pub(crate) fn tab_strip_height(&self) -> f32 {
         crate::titlebar::strip_height(
-            (self.config.tabs.size * 1.6 + 4.).max(TAB_HEIGHT),
+            (self.config.tabs_font().size * 1.6 + 4.).max(TAB_HEIGHT),
             self.tab_bar_position() == TabBarPosition::Top,
         )
     }
@@ -229,8 +231,8 @@ impl SheprdWindow {
             .flex()
             .flex_none()
             .h(px(self.tab_strip_height()))
-            .text_font(&self.config.tabs)
-            .text_size(px(self.config.tabs.size))
+            .text_font(&faces.font)
+            .text_size(px(faces.font.size))
             .overflow_x_scroll()
             .track_scroll(&scroll)
             .px(px(layout.padding()))
@@ -604,26 +606,32 @@ impl SheprdWindow {
         cx: &mut Context<Self>,
         action: impl Fn(&mut Self, &ClickEvent, &mut Window, &mut Context<Self>) + 'static,
     ) -> Stateful<Div> {
-        div()
-            .id(SharedString::from(slot.selector(id)))
+        let element = SharedString::from(slot.selector(id));
+        let button = if self.config.layout.mode.desktop_chrome() {
+            self.desktop_strip_button(element, icon)
+        } else {
+            div()
+                .id(element)
+                .w(px(30.))
+                .min_h(px(TAB_HEIGHT))
+                .flex_none()
+                .flex()
+                .items_center()
+                .justify_center()
+                .cursor_pointer()
+                .hover(|s| s.bg(rgb(self.theme.active)))
+                .child(
+                    svg()
+                        .path(icon)
+                        .size(px(14.))
+                        .text_color(rgb(self.theme.muted)),
+                )
+        };
+        button
             .debug_selector(move || slot.selector(id))
             .role(Role::Button)
             .aria_label(label)
             .map(|control| self.chrome_stop(crate::window::chrome_focus::Region::TitleBar, control))
-            .w(px(30.))
-            .min_h(px(TAB_HEIGHT))
-            .flex_none()
-            .flex()
-            .items_center()
-            .justify_center()
-            .cursor_pointer()
-            .hover(|s| s.bg(rgb(self.theme.active)))
-            .child(
-                svg()
-                    .path(icon)
-                    .size(px(14.))
-                    .text_color(rgb(self.theme.muted)),
-            )
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(cx.listener(move |this, event, window, cx| {
                 cx.stop_propagation();

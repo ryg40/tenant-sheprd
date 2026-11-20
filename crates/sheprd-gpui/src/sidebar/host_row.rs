@@ -56,7 +56,7 @@ impl SheprdWindow {
         pinned: bool,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
-        let font = &self.config.sidebar;
+        let font = &*self.config.sidebar_font();
         let theme = &self.theme;
         let layout = look.density;
         let content_x = look.content_x();
@@ -97,7 +97,7 @@ impl SheprdWindow {
                 let (width, gauges) = crate::system_load::gauges(
                     reading,
                     theme,
-                    super::metrics::glyph_width(font),
+                    layout.glyph(font),
                     (font.size * 0.8).round(),
                     self.config.show_system_load,
                     self.config.show_sidebar_gpu_load,
@@ -109,7 +109,7 @@ impl SheprdWindow {
             .then(|| self.working_summary(endpoint))
             .flatten();
         let working_width = working.as_ref().map_or(0., |text| {
-            text.chars().count() as f32 * super::metrics::glyph_width(font) + host_gap
+            text.chars().count() as f32 * layout.glyph(font) + host_gap
         });
         // A muted device keeps its mark while offline, when it has no snapshot.
         let muted =
@@ -133,7 +133,7 @@ impl SheprdWindow {
                 let line = crate::system_load::gpu_line(
                     reading,
                     theme,
-                    Some(super::metrics::glyph_width(font)),
+                    Some(layout.glyph(font)),
                     crate::config::status_bar::Detail::Detailed,
                 )?;
                 Some((line, reading, host.clone()))
@@ -264,11 +264,16 @@ impl SheprdWindow {
                                     .child(super::native_tests::host_arrow(endpoint_id.clone()));
                                 arrow
                             })
-                            .child(label_text(if endpoint.collapsed {
-                                crate::direction::glyph("\u{25b8}")
-                            } else {
-                                "\u{25be}"
-                            }))
+                            .child(super::layouts::heading_fold(
+                                layout.fold,
+                                endpoint.collapsed,
+                                font,
+                                if endpoint.enabled {
+                                    theme.foreground
+                                } else {
+                                    theme.muted
+                                },
+                            ))
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 cx.stop_propagation();
                                 this.toggle_device(&collapse_id, cx);
@@ -360,7 +365,7 @@ impl SheprdWindow {
                         .child(crate::system_load::line(
                             reading,
                             theme,
-                            Some(super::metrics::glyph_width(font)),
+                            Some(layout.glyph(font)),
                             crate::config::status_bar::Detail::Detailed,
                         ))
                         .tooltip(crate::system_load::tooltip(reading, &host, theme)),

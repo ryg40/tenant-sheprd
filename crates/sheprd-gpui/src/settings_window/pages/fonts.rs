@@ -73,8 +73,8 @@ impl SettingsWindow {
         let id = field.selector();
         let size = self.control_face_size(face);
         let view = cx.entity().downgrade();
-        let label = i18n::message(face_message(face), &[]);
-        let row = ui::row(theme, format!("fonts-{}", face.name()), label)
+        let row = self
+            .face_title(face)
             .control(self.family_button(face, cx))
             .control(
                 ui::number(
@@ -114,6 +114,19 @@ impl SettingsWindow {
                 "fonts-{}",
                 face.name()
             )));
+        row
+    }
+
+    /// A face's row before its controls. The row shows the face's own keys,
+    /// which the desktop layout sets aside for `[ui]` until one is set.
+    fn face_title(&self, face: FontFace) -> ui::Row {
+        let label = i18n::message(face_message(face), &[]);
+        let row = ui::row(&self.theme, format!("fonts-{}", face.name()), label);
+        if self.config.layout.mode.desktop_chrome()
+            && matches!(face, FontFace::Sidebar | FontFace::Tabs)
+        {
+            return row.description(fl!("settings-fonts-desktop-face"));
+        }
         row
     }
 

@@ -19,6 +19,16 @@ fn crashing_child() {
     install("1.2.3");
     match kind.to_str() {
         Some("panic") => panic!("deliberate test panic"),
+        Some("contained") => {
+            contain("page-", handed_over);
+            let page = std::thread::Builder::new()
+                .name("page-1".into())
+                .spawn(page_panics)
+                .unwrap();
+            assert!(page.join().is_err());
+            let handed = HANDED.lock().unwrap().clone();
+            panic!("deliberate test panic after {handed:?}");
+        }
         #[cfg(windows)]
         Some("overlap") => {
             // Another thread's dump is still being written when this crash
@@ -39,6 +49,21 @@ fn crashing_child() {
         }
         _ => {}
     }
+}
+
+/// What the contained thread's panic says, as a page's text would: no log
+/// line and no output of the child may hold it.
+const PRIVATE: &str = "the text of a page";
+
+fn page_panics() {
+    panic!("{PRIVATE}");
+}
+
+/// The name the hook handed over from a contained thread's panic.
+static HANDED: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+fn handed_over(thread: &str) {
+    *HANDED.lock().unwrap() = Some(thread.to_owned());
 }
 
 /// Raises an exception nothing handles, so the process ends in the
@@ -83,7 +108,13 @@ fn quiet_error_reporting() {
 
 /// Runs `crashing_child` with `kind`; returns its logs directory.
 fn crash(kind: &str, state: &Path) -> PathBuf {
-    let status = Command::new(std::env::current_exe().unwrap())
+    crash_output(kind, state).0
+}
+
+/// Runs `crashing_child` with `kind`; returns its logs directory and what
+/// it wrote to its standard output and error.
+fn crash_output(kind: &str, state: &Path) -> (PathBuf, String) {
+    let output = Command::new(std::env::current_exe().unwrap())
         .args([
             "--exact",
             "crash::tests::end_to_end::crashing_child",
@@ -93,12 +124,15 @@ fn crash(kind: &str, state: &Path) -> PathBuf {
         .env(CHILD, kind)
         .env("XDG_STATE_HOME", state)
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
         .unwrap();
-    assert!(!status.success(), "the child did not crash");
-    state.join("herdr").join("gpui").join("logs")
+    assert!(!output.status.success(), "the child did not crash");
+    let printed = [output.stdout, output.stderr]
+        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+        .join("\n");
+    (state.join("herdr").join("gpui").join("logs"), printed)
 }
 
 fn only(dir: &Path, extension: &str) -> PathBuf {
@@ -131,6 +165,30 @@ fn a_panic_leaves_a_report_and_a_flushed_log_record() {
         &fs::read(only(&logs, DUMP_EXTENSION)).unwrap()[..4],
         b"MDMP"
     );
+}
+
+/// A panic on a thread the app contains writes no crash report and logs
+/// its thread and place without its message; a panic on any other thread
+/// of the same process still leaves its report.
+#[test]
+fn a_contained_thread_leaves_no_report_and_another_thread_still_does() {
+    let state = tempfile::tempdir().unwrap();
+    let (logs, printed) = crash_output("contained", state.path());
+    // The only report is the other thread's, which says that the hook
+    // handed the name over.
+    let report = fs::read_to_string(only(&logs, REPORT_EXTENSION)).unwrap();
+    assert!(report.contains(r#"after Some("page-1")"#), "{report}");
+    let log = fs::read_to_string(logs.join("herdr-gpui.jsonl")).unwrap();
+    assert!(!log.contains(PRIVATE), "{log}");
+    assert!(!printed.contains(PRIVATE), "{printed}");
+    let record = log
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .find(|record| record["fields"]["thread"] == "page-1")
+        .unwrap_or_else(|| panic!("no record of the contained thread in\n{log}"));
+    let place = format!("{}:", file!());
+    let location = record["fields"]["location"].as_str().unwrap_or_default();
+    assert!(location.starts_with(&place), "{record}");
 }
 
 #[cfg(windows)]

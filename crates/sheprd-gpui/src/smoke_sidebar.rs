@@ -320,7 +320,12 @@ pub fn start_sidebar(handle: WindowHandle<SheprdWindow>, cx: &mut App) {
         {
             use crate::config::LayoutMode;
             cx.update(|cx| cx.set_global(sidebar::layout_tests::VerifyChildGeometry(false)));
-            for mode in [LayoutMode::Superset, LayoutMode::Orca, LayoutMode::Minimal] {
+            for mode in [
+                LayoutMode::Superset,
+                LayoutMode::Orca,
+                LayoutMode::Minimal,
+                LayoutMode::Desktop,
+            ] {
                         timer.timer(Duration::from_millis(100)).await;
                         let result = AnyWindowHandle::from(handle).update(
                             cx,

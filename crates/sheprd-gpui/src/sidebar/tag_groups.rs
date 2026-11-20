@@ -1,7 +1,7 @@
 //! Devices grouped by tag: the switch over the list, which narrows it to one
 //! tag, and the section heading above each group.
 
-use super::{HOST_ARROW_WIDTH, label_text, layout::SidebarLook, line_height, scaled};
+use super::{HOST_ARROW_WIDTH, layout::SidebarLook, line_height, scaled};
 use crate::{
     SheprdWindow,
     config::corners,
@@ -136,7 +136,7 @@ impl SheprdWindow {
     }
 
     fn tag_segment(&self, tag: Option<&str>, cx: &mut Context<Self>) -> Stateful<Div> {
-        let font = &self.config.sidebar;
+        let font = &*self.config.sidebar_font();
         let active = self.device_tag_filter.as_deref() == tag;
         let label: SharedString = tag
             .map_or_else(|| fl!("device-tags-all"), str::to_owned)
@@ -196,7 +196,7 @@ impl SheprdWindow {
         look: SidebarLook,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
-        let font = &self.config.sidebar;
+        let font = &*self.config.sidebar_font();
         let theme = &self.theme;
         let color = tag.map_or(theme.muted, |tag| tag_color(theme, tag));
         let label = tag.map_or_else(|| fl!("device-tags-untagged"), str::to_owned);
@@ -236,11 +236,12 @@ impl SheprdWindow {
                     .w(px(scaled(font, HOST_ARROW_WIDTH)))
                     .text_size(px(font.size))
                     .text_color(rgb(theme.foreground))
-                    .child(label_text(if folded {
-                        crate::direction::glyph("\u{25b8}")
-                    } else {
-                        "\u{25be}"
-                    })),
+                    .child(super::layouts::heading_fold(
+                        look.density.fold,
+                        folded,
+                        font,
+                        theme.foreground,
+                    )),
             )
             .child(
                 div()

@@ -142,7 +142,7 @@ impl LayoutSaves {
             loaded.layout.mode = mode;
         }
         if let Some(mode) = self.tabs.newer_than(stamps.tabs) {
-            loaded.tab_layout = mode;
+            loaded.choose_tab_layout(mode);
         }
     }
 }

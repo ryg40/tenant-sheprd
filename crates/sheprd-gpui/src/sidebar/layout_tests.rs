@@ -31,6 +31,8 @@ mod coder_dialog;
 #[cfg(test)]
 mod configured_rows;
 #[cfg(test)]
+mod desktop_controls;
+#[cfg(test)]
 mod device_footer;
 #[cfg(test)]
 mod device_footer_setting;

@@ -351,27 +351,41 @@ impl SheprdWindow {
     }
 
     pub(crate) fn sidebar_toggle(&self, cx: &mut Context<Self>) -> AnyElement {
-        div()
-            .id("toggle-sidebar")
+        let desktop = self.config.layout.mode.desktop_chrome();
+        let button = if desktop {
+            crate::chrome_button::square(
+                "toggle-sidebar",
+                crate::chrome_button::RADIUS,
+                &self.theme,
+            )
+        } else {
+            div()
+                .id("toggle-sidebar")
+                .flex_none()
+                .self_center()
+                .size(px(SIDEBAR_TOGGLE_SIZE))
+                .row()
+                .items_center()
+                .justify_center()
+                .rounded(px(crate::config::corners::CONTROL))
+                .cursor_pointer()
+                .hover(|style| style.bg(rgb(self.theme.active)))
+        };
+        let toggle = button
             .debug_selector(|| "toggle-sidebar".into())
             .role(Role::Button)
             .aria_label(fl!("titlebar-sidebar"))
             .aria_expanded(self.sidebar_visible)
             .map(|control| self.chrome_stop(crate::window::chrome_focus::Region::TitleBar, control))
-            .flex_none()
-            .self_center()
-            .size(px(SIDEBAR_TOGGLE_SIZE))
-            .row()
-            .items_center()
-            .justify_center()
-            .rounded(px(crate::config::corners::CONTROL))
-            .cursor_pointer()
-            .hover(|style| style.bg(rgb(self.theme.active)))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(cx.listener(|this, _, window, cx| {
                 cx.stop_propagation();
                 this.command(crate::controls::Command::ToggleSidebar, window, cx);
-            }))
+            }));
+        if desktop {
+            return self.desktop_sidebar_toggle(toggle, SIDEBAR_TOGGLE_SIZE);
+        }
+        toggle
             .child(sidebar_glyph(self.sidebar_visible, &self.theme))
             .into_any_element()
     }

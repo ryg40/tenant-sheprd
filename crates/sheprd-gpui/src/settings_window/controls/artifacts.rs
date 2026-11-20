@@ -107,7 +107,7 @@ impl SettingsWindow {
         cx: &mut Context<Self>,
     ) -> Div {
         self.control_card(&fl!("settings-sidebar-artifacts"))
-            .child(self.control_note(fl!("settings-sidebar-artifacts-note")))
+            .child(self.control_note(fl!("settings-sidebar-artifacts-click-note")))
             .children(self.artifacts.input.as_ref().map(|input| {
                 div()
                     .debug_selector(|| "settings-artifacts-url".into())

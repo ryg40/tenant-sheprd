@@ -15,7 +15,8 @@ sidebar-activity-usage = Usage
 sidebar-activity-walkr = Walkr
 sidebar-activity-settings = Settings
 # The button that opens the artifact server's page: [artifacts] url, or the
-# page of the user's artifacts program, which a yes can start first.
+# page of the user's artifacts program, which a click starts first when it
+# is stopped.
 sidebar-activity-artifacts = Artifacts
 # A screen reader's name for a button with a count: $label is the section,
 # $count how many items it holds.

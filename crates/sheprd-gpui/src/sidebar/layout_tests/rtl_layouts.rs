@@ -7,7 +7,12 @@ use sheprd_i18n::Pseudo;
 fn guides_stay_beside_their_rows_right_to_left(cx: &mut gpui::TestAppContext) {
     use crate::config::LayoutMode;
     crate::i18n::show(&Pseudo::Bidi.locale());
-    for mode in [LayoutMode::Minimal, LayoutMode::Orca, LayoutMode::Superset] {
+    for mode in [
+        LayoutMode::Minimal,
+        LayoutMode::Orca,
+        LayoutMode::Superset,
+        LayoutMode::Desktop,
+    ] {
         // A fresh window per mode, so no bounds linger from another layout.
         let (_, cx) = cx.add_window_view(|window, cx| {
             let mut view = fixture_window(window, cx);

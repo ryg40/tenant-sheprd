@@ -40,6 +40,9 @@ const MAX_OPEN: usize = 256;
 /// The most folders read at once. A refresh reads every open folder, and
 /// the rest wait in line, so the app's other background work keeps going.
 const MAX_READS: usize = 4;
+/// The most roots whose open folders are kept for when the tree comes
+/// back to them; the one left longest ago is forgotten first.
+const MAX_KEPT_ROOTS: usize = 16;
 
 /// Where the tree's root stands.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -104,6 +107,10 @@ pub(crate) struct FileTree {
     expanded: BTreeSet<String>,
     pub(crate) focus: FocusHandle,
     folders: HashMap<String, Folder>,
+    /// The open folders of roots the tree left, for this session: the
+    /// root left last is at the back. A root's folders leave it when the
+    /// tree shows that root again.
+    kept: VecDeque<(PathBuf, BTreeSet<String>)>,
     motion: motion::Toggle,
     /// The user's choice, for this window and session.
     open: bool,
@@ -150,6 +157,7 @@ impl FileTree {
             expanded: BTreeSet::new(),
             focus: cx.focus_handle(),
             folders: HashMap::new(),
+            kept: VecDeque::new(),
             motion: motion::Toggle::default(),
             open: false,
             placed: false,
@@ -188,13 +196,34 @@ impl FileTree {
         self.root == Root::Locating
     }
 
-    /// Forgets everything read under the root, and stops its reads.
+    /// Forgets everything read under the root, and stops its reads. The
+    /// open folders of the root left are kept, and those kept for `root`
+    /// are open again, for the caller to read.
     fn reset(&mut self, root: Root) {
         self.cancelled.store(true, Ordering::Release);
         self.cancelled = Arc::default();
         self.serial += 1;
-        self.root = root;
-        self.expanded.clear();
+        // Taken before the root left is kept, so the bound on kept roots
+        // never drops the one the tree comes back to.
+        let restored = match &root {
+            Root::Ready(root) => self
+                .kept
+                .iter()
+                .position(|(kept, _)| kept == root)
+                .and_then(|at| self.kept.remove(at))
+                .map(|(_, open)| open),
+            _ => None,
+        };
+        let open = std::mem::replace(&mut self.expanded, restored.unwrap_or_default());
+        if let Root::Ready(left) = std::mem::replace(&mut self.root, root) {
+            self.kept.retain(|(kept, _)| *kept != left);
+            if !open.is_empty() {
+                self.kept.push_back((left, open));
+            }
+            if self.kept.len() > MAX_KEPT_ROOTS {
+                self.kept.pop_front();
+            }
+        }
         self.folders.clear();
         self.reads = Reads::default();
         self.reveal = None;
@@ -377,7 +406,7 @@ impl SheprdWindow {
                     Ok(root) if this.file_tree.ready_root() == Some(&root) => {}
                     Ok(root) => {
                         this.file_tree.reset(Root::Ready(root));
-                        this.load_folder(String::new(), cx);
+                        this.read_open_folders(cx);
                         let query = std::mem::take(&mut this.file_tree.searching.query);
                         this.search_files(query, cx);
                     }
@@ -473,17 +502,23 @@ impl SheprdWindow {
         cx.notify();
     }
 
+    /// Reads the root and every open folder. A folder gone from the disk
+    /// closes when its read answers.
+    fn read_open_folders(&mut self, cx: &mut Context<Self>) {
+        let open: Vec<String> = self.file_tree.expanded.iter().cloned().collect();
+        self.load_folder(String::new(), cx);
+        for path in open {
+            self.load_folder(path, cx);
+        }
+    }
+
     /// Reads the root and every open folder again, and the search's index
     /// while a search shows.
     pub(crate) fn refresh_file_tree(&mut self, cx: &mut Context<Self>) {
         if self.file_tree.ready_root().is_none() {
             return;
         }
-        let open: Vec<String> = self.file_tree.expanded.iter().cloned().collect();
-        self.load_folder(String::new(), cx);
-        for path in open {
-            self.load_folder(path, cx);
-        }
+        self.read_open_folders(cx);
         if !self.file_tree.searching.query.is_empty() {
             self.rank_files(true, cx);
         }
@@ -728,7 +763,11 @@ impl SheprdWindow {
             rows::What::Link => {
                 self.show_flash(crate::window::Flash::warning(fl!("file-tree-link")), cx)
             }
-            rows::What::Other | rows::What::More | rows::What::Loading | rows::What::Failed(_) => {}
+            rows::What::Other
+            | rows::What::More(_)
+            | rows::What::Cut
+            | rows::What::Loading
+            | rows::What::Failed(_) => {}
         }
         cx.notify();
     }

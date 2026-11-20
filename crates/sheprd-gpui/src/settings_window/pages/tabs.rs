@@ -38,7 +38,7 @@ impl SettingsWindow {
                         theme,
                         "tabs-layout-control",
                         &layouts,
-                        Some(self.config.tab_layout),
+                        Some(self.config.tab_layout_in_use()),
                         open,
                         on_value(cx, |this, mode, _, cx| {
                             this.save_preference(Preference::TabLayout(mode), cx)

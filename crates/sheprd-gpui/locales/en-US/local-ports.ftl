@@ -58,6 +58,10 @@ local-ports-report-failed = { $count ->
     [one] One could not be signalled.
    *[other] { $count } could not be signalled.
 }
+local-ports-report-unidentified = { $count ->
+    [one] One could not be identified as the process listed, so it was left alone.
+   *[other] { $count } could not be identified as the processes listed, so they were left alone.
+}
 
 # The question before stopping or pausing processes from the Ports section,
 # or from `sheprd ports stop|pause`.

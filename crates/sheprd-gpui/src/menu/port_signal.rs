@@ -1,5 +1,6 @@
 //! Asks before stopping or pausing processes that listen on this computer's
-//! ports, from the Ports section or `sheprd ports stop|pause`. Nothing
+//! ports, from the Ports section, `sheprd ports stop|pause`, or the
+//! Artifacts button when another program holds its server's port. Nothing
 //! is signalled until the user confirms here, once for the whole batch, and
 //! the worker checks again that each pid still names the process shown.
 // i18n: migrated
@@ -42,11 +43,17 @@ impl SheprdWindow {
         cx: &mut Context<Self>,
     ) {
         let pending = self.menu.port_signal.take();
+        let start = self.menu.port_signal_start.take();
         self.dismiss_menu(window, cx);
         let Some(pending) = pending else {
             return;
         };
-        if let Err(error) = self.local_ports.signal(pending.action, pending.victims()) {
+        let signalled = self.local_ports.signal(pending.action, pending.victims());
+        if let Some(start) = start {
+            // The Artifacts button asked: its start follows the stop.
+            return self.start_after_port_stop(start, signalled, window, cx);
+        }
+        if let Err(error) = signalled {
             self.local_error = Some(error.localize());
         }
         cx.notify();

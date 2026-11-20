@@ -49,6 +49,12 @@ pub enum LayoutMode {
     Minimal,
     /// Each device with its agents under it, and a search over them.
     Devices,
+    /// Herdr's rows drawn as a desktop app's sidebar: the proportional
+    /// `[ui]` face, filled rounded highlights, chevrons for folds, icon
+    /// buttons at the end of the headings, and a footer of icon-and-label
+    /// rows. The window around it draws pill tabs and icon buttons too
+    /// ([`Self::desktop_chrome`]).
+    Desktop,
 }
 
 impl Default for LayoutMode {
@@ -69,11 +75,12 @@ impl LayoutMode {
         "superset",
         "orca",
         "minimal",
+        "desktop",
         "devices",
     ];
 
     /// Every named layout, in the order menus list them.
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 11] = [
         Self::new(Density::Normal, Style::Flat),
         Self::new(Density::Compact, Style::Flat),
         Self::new(Density::Comfortable, Style::Flat),
@@ -83,6 +90,7 @@ impl LayoutMode {
         Self::Superset,
         Self::Orca,
         Self::Minimal,
+        Self::Desktop,
         Self::Devices,
     ];
 
@@ -96,7 +104,7 @@ impl LayoutMode {
         match self {
             Self::Classic { density, .. } => density,
             Self::Superset | Self::Minimal | Self::Devices => Density::Normal,
-            Self::Orca => Density::Comfortable,
+            Self::Orca | Self::Desktop => Density::Comfortable,
         }
     }
 
@@ -105,7 +113,7 @@ impl LayoutMode {
         match self {
             Self::Classic { style, .. } => style,
             Self::Superset | Self::Minimal | Self::Devices => Style::Flat,
-            Self::Orca => Style::Rounded,
+            Self::Orca | Self::Desktop => Style::Rounded,
         }
     }
 
@@ -114,6 +122,18 @@ impl LayoutMode {
     /// draw none either.
     pub const fn device_icons(self) -> bool {
         !matches!(self, Self::Orca | Self::Minimal)
+    }
+
+    /// Whether the window's chrome draws as a desktop app's: sidebar and
+    /// tab text in the proportional `[ui]` face
+    /// ([`super::Config::sidebar_font`], [`super::Config::tabs_font`]),
+    /// icon buttons at the end of the sidebar's headings, in the tab strips,
+    /// and in the title bar, a sidebar footer of icon-and-label rows, and
+    /// pill tabs until the user picks a tab layout. Otherwise it draws as
+    /// the terminal client's: the monospace faces, lowercase links, and
+    /// full-height cells.
+    pub const fn desktop_chrome(self) -> bool {
+        matches!(self, Self::Desktop)
     }
 
     /// Whether the spaces list shows workspaces. The Devices layout lists
@@ -136,6 +156,7 @@ impl LayoutMode {
             Self::Superset => "superset",
             Self::Orca => "orca",
             Self::Minimal => "minimal",
+            Self::Desktop => "desktop",
             Self::Devices => "devices",
         }
     }
@@ -159,6 +180,7 @@ impl LayoutMode {
             Self::Superset => "layout-superset",
             Self::Orca => "layout-orca",
             Self::Minimal => "layout-minimal",
+            Self::Desktop => "layout-desktop",
             Self::Devices => "layout-devices",
         }
     }

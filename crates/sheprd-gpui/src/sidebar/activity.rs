@@ -249,7 +249,7 @@ impl SheprdWindow {
     /// no bar.
     pub(crate) fn activity_title_height(&self) -> f32 {
         if self.activity_bar_shown() {
-            TITLE_HEIGHT.max(line_height(&self.config.sidebar) + 8.)
+            TITLE_HEIGHT.max(line_height(&self.config.sidebar_font()) + 8.)
         } else {
             0.
         }
@@ -508,9 +508,9 @@ impl SheprdWindow {
             tabs = tabs.child(button);
         }
         // A link, not a section, listed under Walkr and over the mod apps:
-        // it opens the artifacts page as a browser tab, asking first to
-        // start a stopped local server (`crate::artifacts`). It pulses while
-        // the program runs.
+        // it opens the artifacts page as a browser tab, and first starts a
+        // stopped local server, without a question (`crate::artifacts`). It
+        // pulses while the program runs.
         let artifacts = crate::artifacts::shown(&self.config.artifacts, cx).then(|| {
             self.bar_button(
                 "activity-artifacts",
@@ -685,7 +685,7 @@ impl SheprdWindow {
     fn panel_title(&self, panel: ActivityPanel, cx: &mut Context<Self>) -> Div {
         let expanded = self.sidebar_visible;
         let theme = &self.theme;
-        let font = &self.config.sidebar;
+        let font = &*self.config.sidebar_font();
         div()
             .debug_selector(|| "activity-title".into())
             .flex_none()

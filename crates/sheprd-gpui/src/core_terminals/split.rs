@@ -65,12 +65,13 @@ impl SheprdWindow {
         let active = shown.active.clone();
         let chrome = self.tab_layout().panes();
         let indicators = self.core_indicators(cx);
+        let tabs = self.config.tabs_font();
         let draw = Draw {
             tab: tab.id,
             chrome,
             panes: PaneContext {
                 theme: &self.theme,
-                tabs: &self.config.tabs,
+                tabs: &tabs,
                 terminal: &self.config.terminal,
                 indicators,
             },

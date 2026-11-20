@@ -28,7 +28,7 @@ impl SheprdWindow {
         width: f32,
         cx: &mut Context<Self>,
     ) -> (Stateful<Div>, usize, Option<usize>) {
-        let font = &self.config.sidebar;
+        let font = &*self.config.sidebar_font();
         let theme = &self.theme;
         let multi = self.endpoints.len() > 1;
         let mut count = 0;
@@ -98,7 +98,8 @@ impl SheprdWindow {
     /// configured `row_gap` between configured rows, none otherwise.
     pub(super) fn agent_row_gap(&self, count: usize) -> f32 {
         if self.custom_agent_rows() && count > 0 {
-            f32::from(self.config.sidebar_layout.agents.row_gap) * line_height(&self.config.sidebar)
+            f32::from(self.config.sidebar_layout.agents.row_gap)
+                * line_height(&self.config.sidebar_font())
         } else {
             0.
         }

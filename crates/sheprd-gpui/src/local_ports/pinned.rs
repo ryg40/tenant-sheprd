@@ -2,13 +2,18 @@
 //!
 //! Linux gives a process a descriptor that stays tied to it, so a signal
 //! sent through one can never reach a later process given the same pid: it
-//! fails once the process has exited. macOS has no public equivalent, nor
-//! has a Linux older than 5.3, so there `open` finds nothing and the caller
-//! signals by pid right after checking it, which leaves a window of
-//! microseconds in which the process would have to exit and its pid be
-//! reused.
+//! fails once the process has exited. There every signal goes through one,
+//! and a process that cannot be held (a Linux older than 5.3, or no
+//! descriptor left) is not signalled at all. macOS has no public
+//! equivalent, so there `open` finds nothing and the caller signals by pid
+//! right after checking it, which leaves a window of microseconds in which
+//! the process would have to exit and its pid be reused.
 
 use sysinfo::Signal;
+
+/// Whether this OS can hold a process. Where it can, a signal never goes
+/// to a bare pid.
+pub(super) const HOLDS: bool = cfg!(target_os = "linux");
 
 #[cfg(target_os = "linux")]
 pub(super) struct Pinned(std::os::fd::OwnedFd);

@@ -3,12 +3,19 @@
 //! thread, so they only queue these for the window to apply on its next
 //! tick, in a bounded queue.
 use super::TabId;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", servo_pages))]
 use super::WebUrl;
 use std::sync::{
     atomic::{AtomicU64, Ordering},
     mpsc::{SyncSender, TrySendError},
 };
+
+/// A popup's page before its window adopts it: WebKit's view on macOS, and
+/// the page Servo built on Linux.
+#[cfg(target_os = "macos")]
+pub(crate) type Popup = super::popup::Popup;
+#[cfg(servo_pages)]
+pub(crate) type Popup = super::engine::Popup;
 
 /// Enough for a burst of title and load reports between two window ticks;
 /// later ones are dropped rather than queued without bound.
@@ -25,11 +32,13 @@ pub(crate) enum Event<P = TabId> {
     /// macOS asks for this only when it cannot build the popup itself.
     NewWindow(P, String),
     /// The page opened a popup, already built and linked to it, which the
-    /// window adopts as a new tab. Only macOS builds them.
-    #[cfg(target_os = "macos")]
-    Opened(P, WebUrl, Source, super::popup::Popup),
-    /// A popup's script closed it, which closes its tab.
-    #[cfg(target_os = "macos")]
+    /// window adopts as a new tab. WebKit builds them on macOS, and Servo
+    /// on Linux; Windows has none.
+    #[cfg(any(target_os = "macos", servo_pages))]
+    Opened(P, WebUrl, Source, Popup),
+    /// A popup ended, which closes its tab: its script closed it (WebKit),
+    /// or the engine ended it as its tab took it (Servo).
+    #[cfg(any(target_os = "macos", servo_pages))]
     Closed(P),
     /// A screenshot for a note, as TIFF bytes, or `None` when WebKit had
     /// none. Only macOS takes them.
@@ -57,7 +66,7 @@ pub(crate) enum Source {
     Walkr(u64),
     /// The page of a saved Walkr session, the same way.
     WalkrSession(u64),
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", servo_pages))]
     Popup(u64),
 }
 
@@ -70,9 +79,9 @@ impl<P> Event<P> {
             Self::Title(source, _) => ("title", source),
             Self::Loaded(source, _) => ("loaded", source),
             Self::NewWindow(source, _) => ("new-window", source),
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", servo_pages))]
             Self::Opened(source, ..) => ("opened", source),
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", servo_pages))]
             Self::Closed(source) => ("closed", source),
             #[cfg(target_os = "macos")]
             Self::Captured(source, ..) => ("captured", source),
@@ -106,9 +115,9 @@ impl Event<Source> {
             Self::Title(source, title) => Event::Title(tab(source)?, title),
             Self::Loaded(source, url) => Event::Loaded(tab(source)?, url),
             Self::NewWindow(source, url) => Event::NewWindow(tab(source)?, url),
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", servo_pages))]
             Self::Opened(source, url, popup, page) => Event::Opened(tab(source)?, url, popup, page),
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", servo_pages))]
             Self::Closed(source) => Event::Closed(tab(source)?),
             #[cfg(target_os = "macos")]
             Self::Captured(source, capture, tiff) => Event::Captured(tab(source)?, capture, tiff),

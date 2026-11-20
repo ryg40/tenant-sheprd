@@ -58,9 +58,8 @@ impl SheprdWindow {
         #[cfg(embedded_pages)]
         {
             self.theme_pages(cx);
-            let mut live = Vec::new();
-            if self.activity_section().is_none() && self.mod_app().is_none() {
-                live.extend(self.live_pages(cx));
+            let mut live = self.live_pages(cx);
+            if self.draws_groups() {
                 live.extend(self.shown_chat_pages());
             }
             if self.activity_section() == Some(crate::sidebar::ActivityPanel::Walkr)

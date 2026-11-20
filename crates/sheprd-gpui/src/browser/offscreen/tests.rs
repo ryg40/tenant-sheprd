@@ -185,5 +185,8 @@ fn a_report_of_the_load_before_a_changed_address_changes_no_state_and_no_page(
     });
 }
 
+/// A tab whose page stopped while its window's report queue was full.
+mod stopped;
+
 /// The page of a saved Walkr session, one instance at a time.
 mod walkr_session;

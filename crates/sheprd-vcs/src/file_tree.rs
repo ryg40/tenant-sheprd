@@ -20,7 +20,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// The most entries one folder lists; the rest show as "more".
+/// The most entries one folder lists; the rest are counted in [`Omitted`].
 pub const MAX_ENTRIES: usize = 2_000;
 /// The most entries of a folder looked at to find those, which are the
 /// first by name of the ones looked at.
@@ -64,8 +64,32 @@ pub struct Entry {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Listing {
     pub entries: Vec<Entry>,
-    /// A limit, or a name that cannot be shown, left entries out.
-    pub more: bool,
+    /// The entries a limit, or a name that cannot be shown, left out.
+    pub omitted: Omitted,
+}
+
+/// How many entries of a folder its listing leaves out. `.git` is not
+/// counted: it is never listed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Omitted {
+    /// This many, of all the folder holds; zero when every entry is listed.
+    Exactly(usize),
+    /// At least this many: the folder holds more entries than were looked
+    /// at, and those are not counted.
+    AtLeast(usize),
+}
+
+impl Default for Omitted {
+    fn default() -> Self {
+        Self::Exactly(0)
+    }
+}
+
+impl Omitted {
+    /// Whether any entry is left out.
+    pub fn any(self) -> bool {
+        self != Self::Exactly(0)
+    }
 }
 
 /// The names of `path`, a `/`-separated path relative to a root, or why it
@@ -133,17 +157,20 @@ pub fn list(root: &Path, path: &str, cancelled: &AtomicBool) -> crate::Result<Li
     let folder = real_folder(root, path)?;
     let mut listing = Listing::default();
     let mut scanned = 0;
+    // Entries looked at and left out: unreadable, or a name not shown.
+    let mut skipped = 0;
+    let mut uncounted = false;
     for entry in std::fs::read_dir(&folder).map_err(Error::Unreadable)? {
         if stop() {
             return Err(Error::Cancelled.into());
         }
         scanned += 1;
         if scanned > MAX_SCANNED {
-            listing.more = true;
+            uncounted = true;
             break;
         }
         let Ok(entry) = entry else {
-            listing.more = true;
+            skipped += 1;
             continue;
         };
         let name = entry.file_name();
@@ -151,7 +178,7 @@ pub fn list(root: &Path, path: &str, cancelled: &AtomicBool) -> crate::Result<Li
             continue;
         }
         let Some(name) = name.to_str().filter(|name| shown(name)) else {
-            listing.more = true;
+            skipped += 1;
             continue;
         };
         let kind = match entry.file_type() {
@@ -175,10 +202,12 @@ pub fn list(root: &Path, path: &str, cancelled: &AtomicBool) -> crate::Result<Li
     });
     // Cut after the sort, so the entries shown are the first by name, not
     // the first the folder happened to give.
-    if listing.entries.len() > MAX_ENTRIES {
-        listing.entries.truncate(MAX_ENTRIES);
-        listing.more = true;
-    }
+    let cut = listing.entries.len().saturating_sub(MAX_ENTRIES);
+    listing.entries.truncate(MAX_ENTRIES);
+    listing.omitted = match uncounted {
+        false => Omitted::Exactly(skipped + cut),
+        true => Omitted::AtLeast(skipped + cut),
+    };
     mark_ignored(root, path, &mut listing.entries, &stop);
     Ok(listing)
 }

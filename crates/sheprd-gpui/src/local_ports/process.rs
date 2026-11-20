@@ -2,12 +2,28 @@
 //! signalling exactly one of them.
 //!
 //! A pid is reused once its process exits, so every signal first looks the
-//! pid up again and goes ahead only while it still names the process the
-//! user chose: the same start time, owned by this user. The signal goes to
-//! that process alone, never to a group or a name, and through [`Pinned`]
-//! where the OS can hold it.
+//! pid up again and goes ahead only while it is proven to name the process
+//! the user chose: the same start ([`Birth`]), known to be owned by this
+//! user. Without that proof (no start read, an owner the OS would not
+//! name, no handle where the OS has them) nothing is sent. The signal goes
+//! to that process alone, never to a group or a name.
+//!
+//! On Linux the proof is closed by order. The handle ([`Pinned`]) is taken
+//! first and the pid read after it. A read that shows the listed start
+//! shows a process that began before the listing and so held the pid when
+//! the handle was taken: the handle is its own. What stays open is a pid
+//! reused within one clock tick of the listed start, which needs every
+//! other pid to be handed out in a hundredth of a second. macOS has no
+//! handle and reads whole seconds, so there a signal goes by pid right
+//! after the read, as before.
 
-use super::{Listener, Outcome, Started, naming, pinned::Pinned, scan::Socket};
+use super::{
+    Listener, Outcome, Started,
+    birth::{self, Birth, Victim},
+    naming,
+    pinned::{self, Pinned},
+    scan::Socket,
+};
 use crate::{
     listening_ports::{socket, token},
     processes::Identity,
@@ -41,23 +57,48 @@ pub(super) fn user() -> u32 {
 /// The process `pid` names now, as far as signalling cares.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Found {
-    pub started: u64,
+    /// `None` when the OS would not say.
+    pub birth: Option<Birth>,
+    pub tie: Tie,
     /// `None` when the OS would not say.
     pub user: Option<u32>,
     /// Exited, and only waiting for its parent to reap it.
     pub zombie: bool,
 }
 
-/// Whether `found` is still `victim`, a process of `user` that is running.
-pub(crate) fn check(found: Option<Found>, victim: Identity, user: u32) -> Result<(), Outcome> {
+/// How a signal can be tied to the process a look found.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Tie {
+    // keep-sorted start
+    /// Through a handle the OS keeps on the process itself, taken before
+    /// the look.
+    Held,
+    /// This OS has such handles, and this process's could not be taken.
+    Missing,
+    /// This OS has no such handle (macOS): by pid, right after the look.
+    Pid,
+    // keep-sorted end
+}
+
+/// Whether `found` is proven to be `victim`, a running process of `user`.
+/// A pid that is gone or reads another start is the victim no longer; a
+/// start, an owner, or a handle that is missing proves nothing either way.
+pub(crate) fn check(found: Option<Found>, victim: Victim, user: u32) -> Result<(), Outcome> {
     let found = found.ok_or(Outcome::Exited)?;
-    if found.zombie || found.started != victim.started {
+    if found.zombie {
         return Err(Outcome::Exited);
     }
-    if found.user.is_some_and(|owner| owner != user) {
-        return Err(Outcome::Foreign);
+    let (Some(listed), Some(read)) = (victim.birth, found.birth) else {
+        return Err(Outcome::Unidentified);
+    };
+    if listed != read {
+        return Err(Outcome::Exited);
     }
-    Ok(())
+    match found.user {
+        Some(owner) if owner != user => Err(Outcome::Foreign),
+        Some(_) if found.tie != Tie::Missing => Ok(()),
+        Some(_) | None => Err(Outcome::Unidentified),
+    }
 }
 
 /// Reads `pids` afresh. A new table every time: macOS `sysinfo` keeps the
@@ -74,10 +115,11 @@ fn refresh(system: &mut System, pids: &[Pid]) {
     );
 }
 
-fn found(system: &System, pid: u32) -> Option<Found> {
+fn found(system: &System, pid: u32, tie: Tie) -> Option<Found> {
     let process = system.process(Pid::from_u32(pid))?;
     Some(Found {
-        started: process.start_time(),
+        birth: birth::now(pid, process.start_time()),
+        tie,
         user: process.user_id().map(|uid| **uid),
         zombie: matches!(
             process.status(),
@@ -148,6 +190,13 @@ pub(super) fn describe(
         .collect();
     pids.sort_unstable();
     pids.dedup();
+    // Read before the table and again after it (Linux): a pid whose start
+    // changed in between went to another process while the table was
+    // read, and its row would name one process and stop the other.
+    let early: HashMap<u32, Option<Birth>> = pids
+        .iter()
+        .map(|pid| (pid.as_u32(), birth::early(pid.as_u32())))
+        .collect();
     *system = System::new();
     system.refresh_processes_specifics(
         ProcessesToUpdate::Some(&pids),
@@ -173,6 +222,10 @@ pub(super) fn describe(
                 pid: socket.pid,
                 started: process.start_time(),
             };
+            let birth = birth::now(socket.pid, identity.started);
+            if birth::BRACKETS && early.get(&socket.pid).copied().flatten() != birth {
+                return None;
+            }
             // `lsof` cuts names at nine characters; the OS's own is longer.
             let own = display(&process.name().to_string_lossy(), NAME_LIMIT);
             let process_name = if own.is_empty() { socket.process } else { own };
@@ -192,8 +245,10 @@ pub(super) fn describe(
             let (cpu, memory) = usage.get(&identity).copied().unwrap_or_default();
             Some(Listener {
                 identity,
+                birth,
                 number: socket.number,
                 bind: socket.bind,
+                bound: socket.bound,
                 name: naming::name(&process_name, process.exe(), &arguments),
                 command: display(&arguments.join(" "), COMMAND_LIMIT),
                 system: naming::system(&process_name),
@@ -228,9 +283,9 @@ pub(crate) fn started(environment: &[std::ffi::OsString]) -> Option<Started> {
 }
 
 /// Looks `pid` up afresh.
-fn look(system: &mut System, pid: u32) -> Option<Found> {
+fn look(system: &mut System, pid: u32, tie: Tie) -> Option<Found> {
     refresh(system, &[Pid::from_u32(pid)]);
-    found(system, pid)
+    found(system, pid, tie)
 }
 
 fn send(system: &System, pid: u32, signal: Signal) -> bool {
@@ -245,7 +300,7 @@ fn send(system: &System, pid: u32, signal: Signal) -> bool {
 pub(super) fn act(
     system: &mut System,
     action: PortAction,
-    victims: &[Identity],
+    victims: &[Victim],
     user: u32,
     grace: Duration,
 ) -> Vec<(Identity, Outcome)> {
@@ -253,17 +308,24 @@ pub(super) fn act(
     // of the process every later signal goes to.
     let pinned: HashMap<Identity, Pinned> = victims
         .iter()
-        .filter_map(|victim| Some((*victim, Pinned::open(victim.pid)?)))
+        .filter_map(|victim| Some((victim.identity, Pinned::open(victim.identity.pid)?)))
         .collect();
+    let tie = |victim: &Identity| match pinned.get(victim) {
+        Some(_) => Tie::Held,
+        None if pinned::HOLDS => Tie::Missing,
+        None => Tie::Pid,
+    };
     let system = RefCell::new(system);
     act_with(
         action,
         victims,
         user,
         grace,
-        |victim| look(&mut system.borrow_mut(), victim.pid),
+        |victim| look(&mut system.borrow_mut(), victim.pid, tie(&victim)),
         |victim, signal| match pinned.get(&victim) {
             Some(process) => process.send(signal),
+            // Where the OS holds processes, none is signalled by its pid.
+            None if pinned::HOLDS => false,
             None => send(&system.borrow(), victim.pid, signal),
         },
         thread::sleep,
@@ -271,15 +333,15 @@ pub(super) fn act(
 }
 
 /// [`act`]'s steps, with the OS behind `look` (the pid's process now),
-/// `send`, and `wait`. Every signal goes out only once a fresh look shows
-/// the pid still names its victim. Stopping sends SIGTERM to them all, then
+/// `send`, and `wait`. Every signal goes out only once a fresh look proves
+/// the pid still names its victim ([`check`]). Stopping sends SIGTERM to them all, then
 /// SIGCONT so a paused one can act on it, and SIGKILL to those still running
 /// after one shared `grace`, so a batch takes no longer than one process. A
 /// process that exits and whose pid is reused in between is never resumed
 /// or killed.
 pub(crate) fn act_with(
     action: PortAction,
-    victims: &[Identity],
+    victims: &[Victim],
     user: u32,
     grace: Duration,
     mut look: impl FnMut(Identity) -> Option<Found>,
@@ -294,12 +356,12 @@ pub(crate) fn act_with(
     let mut outcomes: Vec<(Identity, Outcome)> = victims
         .iter()
         .map(|&victim| {
-            let outcome = match check(look(victim), victim, user) {
+            let outcome = match check(look(victim.identity), victim, user) {
                 Err(outcome) => outcome,
-                Ok(()) if send(victim, signal) => Outcome::Signalled,
+                Ok(()) if send(victim.identity, signal) => Outcome::Signalled,
                 Ok(()) => Outcome::Failed,
             };
-            (victim, outcome)
+            (victim.identity, outcome)
         })
         .collect();
     if action != PortAction::Stop {
@@ -309,10 +371,10 @@ pub(crate) fn act_with(
         .filter(|&index| outcomes[index].1 == Outcome::Signalled)
         .collect();
     running.retain(|&index| {
-        let victim = outcomes[index].0;
-        let alive = check(look(victim), victim, user).is_ok();
+        let victim = victims[index];
+        let alive = check(look(victim.identity), victim, user).is_ok();
         if alive {
-            send(victim, Signal::Continue);
+            send(victim.identity, Signal::Continue);
         }
         alive
     });
@@ -321,14 +383,14 @@ pub(crate) fn act_with(
         wait(POLL);
         waited += POLL;
         running.retain(|&index| {
-            let victim = outcomes[index].0;
-            check(look(victim), victim, user).is_ok()
+            let victim = victims[index];
+            check(look(victim.identity), victim, user).is_ok()
         });
     }
     for index in running {
-        let victim = outcomes[index].0;
-        if check(look(victim), victim, user).is_ok() {
-            outcomes[index].1 = if send(victim, Signal::Kill) {
+        let victim = victims[index];
+        if check(look(victim.identity), victim, user).is_ok() {
+            outcomes[index].1 = if send(victim.identity, Signal::Kill) {
                 Outcome::Killed
             } else {
                 Outcome::Failed

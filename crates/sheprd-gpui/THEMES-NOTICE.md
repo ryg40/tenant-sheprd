@@ -6,6 +6,11 @@ directory `ghostty/`, revision `c379d7a31af861838a017468b03120c8970eaa00`.
 `src/config/theme.rs` compiles them in as built-in themes. The collection is
 MIT-licensed; the copyright for each individual theme belongs to its author.
 
+Four files are the exception: `Lavender Light`, `Lavender Gray`,
+`Torch Light`, and `Torch Dark` are this fork's own themes, drawn for it
+from the Lavender and Torch palettes. They have no upstream, are not part
+of iTerm2-Color-Schemes, and come under this repository's license.
+
 ```text
 MIT License
 

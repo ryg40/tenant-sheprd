@@ -3,4 +3,5 @@
 mod opens;
 mod panel;
 mod reads;
+mod roots;
 mod search;

@@ -46,6 +46,7 @@ impl SheprdWindow {
             activity_panel: self.activity.chosen(),
             agent_sort: self.agent_sort_modified.then_some(self.agent_sort),
             device_order: self.device_order.clone(),
+            file_tree_width: self.file_tree_width.chosen(),
             kanban_lane_order: self.kanban_order.keys.lanes.clone(),
             kanban_ranks: self.kanban_order.keys.ranks.clone(),
             mod_panel_width: self.mod_panel_width.chosen(),

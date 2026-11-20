@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 /// keep the preset's value, so a layout still looks like itself. The card
 /// layouts, superset and orca, copy another app's rows and read only the keys
 /// that fit them: `row_padding` has no effect there, and orca keeps its own
-/// gap too.
+/// gap too. The desktop layout uses Herdr's rows and reads every key.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct SidebarOverrides {
     /// Pixels each nesting level steps in: workspaces under their host,

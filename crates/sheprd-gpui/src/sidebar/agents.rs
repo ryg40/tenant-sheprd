@@ -18,6 +18,8 @@ use sheprd_client::protocol::{AgentStatus, ClientShellAgent, ClientShellSnapshot
 
 pub(crate) mod groups;
 
+/// The agents header's sort: a button that toggles it, or the name of a
+/// plugin's view while one decides the order.
 pub(super) fn agents_sort(window: &SheprdWindow, cx: &mut Context<SheprdWindow>) -> Stateful<Div> {
     let theme = &window.theme;
     let view = window
@@ -25,6 +27,21 @@ pub(super) fn agents_sort(window: &SheprdWindow, cx: &mut Context<SheprdWindow>)
         .snapshot
         .as_ref()
         .and_then(|snapshot| snapshot.agent_view_label.clone());
+    // An icon button says the sort it keeps in its tooltip.
+    if view.is_none() && window.config.layout.mode.desktop_chrome() {
+        let name = fl!("sidebar-agents-sort", sort = sort_label(window.agent_sort));
+        let button = crate::chrome_button::icon_button(
+            "agents-sort",
+            "icons/sort.svg",
+            crate::chrome_button::RADIUS,
+            theme,
+        )
+        .debug_selector(|| "agents-sort".into())
+        .tooltip(super::rail::Hint::new(theme).with(name.clone()));
+        return window
+            .sidebar_button(button, name)
+            .on_click(cx.listener(toggle_sort));
+    }
     let label = view
         .clone()
         .unwrap_or_else(|| sort_label(window.agent_sort));
@@ -51,15 +68,22 @@ pub(super) fn agents_sort(window: &SheprdWindow, cx: &mut Context<SheprdWindow>)
         .when(view.is_none(), |sort| {
             sort.cursor_pointer()
                 .hover(|style| style.text_color(rgb(theme.foreground)))
-                .on_click(cx.listener(|this, _, _, cx| {
-                    cx.stop_propagation();
-                    this.agent_sort = this.agent_sort.toggled();
-                    this.agent_sort_modified = true;
-                    this.save_chrome();
-                    cx.notify();
-                }))
+                .on_click(cx.listener(toggle_sort))
         })
         .child(label_text(&label))
+}
+
+fn toggle_sort(
+    this: &mut SheprdWindow,
+    _: &ClickEvent,
+    _: &mut Window,
+    cx: &mut Context<SheprdWindow>,
+) {
+    cx.stop_propagation();
+    this.agent_sort = this.agent_sort.toggled();
+    this.agent_sort_modified = true;
+    this.save_chrome();
+    cx.notify();
 }
 
 /// The agents header's name for how it sorts, which a click toggles.

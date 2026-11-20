@@ -1,12 +1,17 @@
 //! The engine's thread: Servo, each page's `WebView`, and what Servo asks
 //! of its host. Every handler here applies the page rules of
 //! [`crate::browser::policy`]; none of them touches the window.
-use super::{Answered, Command, Error, Frame, Open, PageKey, console, controls::Held, profile};
+use super::{
+    Answered, Command, Error, Frame, Input, Open, PageKey, console,
+    controls::Held,
+    popup::{Activation, Opening},
+    profile,
+};
 use crate::browser::{
     location::PREVIEW_SCHEME,
     policy::{Verdict, loadable, navigable, posted, verdict},
     preview::{Answer, Preview},
-    reports::{Event, report},
+    reports::{Event, Source, report},
 };
 use crossbeam_channel::{Receiver, Sender, select};
 use servo::{
@@ -14,8 +19,7 @@ use servo::{
     EmbedderControl, EmbedderControlId, EventLoopWaker, InputEvent, JSValue, LoadStatus,
     MouseMoveEvent, NavigationRequest, Opts, Preferences, RenderingContext, Servo, ServoBuilder,
     ServoDelegate, ServoError, SiteData, SoftwareRenderingContext, StorageType, Theme,
-    UserContentManager, UserScript, WebResourceLoad, WebResourceResponse, WebView, WebViewBuilder,
-    WebViewDelegate, WebViewPoint,
+    WebResourceLoad, WebResourceResponse, WebView, WebViewBuilder, WebViewDelegate, WebViewPoint,
     protocol_handler::{
         DoneChannel, FetchContext, NetworkError, ProtocolHandler, ProtocolRegistry, Request,
         Response,
@@ -32,6 +36,9 @@ use std::{
     time::Instant,
 };
 
+mod maker;
+use maker::Maker;
+
 /// Commands applied before Servo runs again, so a burst of pointer moves
 /// does not starve its painting.
 const BATCH: usize = 64;
@@ -42,22 +49,6 @@ const ANSWERS: usize = 64;
 
 /// A page's size until its window lays it out.
 const FIRST_SIZE: dpi::PhysicalSize<u32> = dpi::PhysicalSize::new(800, 600);
-
-/// Gives every page `window.ipc.postMessage`, as wry does, which the
-/// annotation picker and the bridge post through. Servo has no channel from
-/// a page to its host, so a message is a request to the preview scheme, which
-/// the page's own handler reads and never serves.
-// i18n: data
-const IPC: &str = "(function () {\
-  if (window.ipc) { return; }\
-  var post = function (body) {\
-    try {\
-      fetch('herdr-preview://localhost/.herdr/post?m=' + encodeURIComponent(String(body)),\
-        { mode: 'no-cors', cache: 'no-store', credentials: 'omit' }).catch(function () {});\
-    } catch (_) {}\
-  };\
-  Object.defineProperty(window, 'ipc', { value: Object.freeze({ postMessage: post }) });\
-})();";
 
 /// Servo's preferences for pages. Servo keeps web features it has not
 /// finished behind preferences that are off; each one turned on here is
@@ -77,6 +68,10 @@ fn preferences() -> Preferences {
         // Pages that ship one variable font draw every weight alike
         // without `font-variation-settings` and the font's weight axis.
         layout_css_font_variations_enabled: true,
+        // `dom_async_clipboard_enabled` must stay off: Servo names only the
+        // `WebView` of a clipboard read, so the host's rule
+        // (`engine/clipboard.rs`) cannot tell `readText()` in any frame
+        // from the paste that a key granted.
         ..Preferences::default()
     }
 }
@@ -246,12 +241,23 @@ struct State {
     top: RefCell<Option<String>>,
     /// The records the tab's page may still put in the log.
     budget: RefCell<console::Budget>,
+    /// The pointer's shape the window shows over the page.
+    pointer: super::cursor::Pointer,
     /// The list the page has open, if it has one.
     held: Held,
+    clipboard: Rc<super::clipboard::Clipboard>,
+    /// Whether the page's script thread ended ([`super::stopped`]).
+    probe: Rc<super::stopped::Probe>,
+    /// Whether the page may open a new window now ([`super::popup`]).
+    activation: Activation,
+    /// The page's place as a new window, when Servo built it for one.
+    opening: Opening,
+    /// Makes the page of each new window it opens.
+    maker: Rc<Maker>,
 }
 
 impl State {
-    fn report(&self, event: Event<crate::browser::reports::Source>) {
+    fn report(&self, event: Event<Source>) {
         report(&self.open.reports, event);
     }
 
@@ -281,7 +287,27 @@ impl WebViewDelegate for Delegate {
     }
 
     fn notify_url_changed(&self, _: WebView, url: url::Url) {
+        // Servo reports no start of a load for a step back or forward to a
+        // document it kept: the clipboard's grants end with every address.
+        self.0.clipboard.forget();
         *self.0.top.borrow_mut() = Some(url.into());
+        // Servo sends it with each change of the page's history, also for a
+        // document it restores, which starts no load.
+        self.0.pointer.reset();
+    }
+
+    fn notify_cursor_changed(&self, _: WebView, cursor: servo::Cursor) {
+        self.0.pointer.show(cursor);
+    }
+
+    fn notify_input_event_handled(
+        &self,
+        view: WebView,
+        id: servo::InputEventId,
+        result: servo::InputEventResult,
+    ) {
+        self.0.pointer.handled(id, result, || view.cursor());
+        self.0.clipboard.handled(id, Instant::now());
     }
 
     fn notify_page_title_changed(&self, _: WebView, title: Option<String>) {
@@ -294,7 +320,11 @@ impl WebViewDelegate for Delegate {
         // A list belongs to the page that opened it.
         if matches!(status, LoadStatus::Started) {
             self.0.held.dismiss();
+            // So does a shape, and the new document has asked for none.
+            self.0.pointer.reset();
+            self.0.clipboard.forget();
         }
+        self.0.probe.loaded(status);
         if matches!(status, LoadStatus::Complete)
             && let Some(url) = view.url()
         {
@@ -311,13 +341,30 @@ impl WebViewDelegate for Delegate {
         }
     }
 
-    fn notify_crashed(&self, _: WebView, reason: String, _: Option<String>) {
-        tracing::warn!(reason, "A Servo page crashed");
+    /// Servo's own word that the page stopped. Its reason is the panic's
+    /// message, which may hold the page's text: it stays out of the log.
+    fn notify_crashed(&self, _: WebView, _: String, _: Option<String>) {
+        tracing::warn!("A Servo page crashed");
+        self.0.probe.stopped();
     }
 
-    /// A page leaves only for web addresses and the preview scheme.
+    /// A Back or Forward step ended, also one that loaded no document.
+    fn notify_traversal_complete(&self, _: WebView, _: servo::TraversalId) {
+        self.0.probe.stepped();
+    }
+
+    /// A page leaves only for web addresses and the preview scheme. The
+    /// first navigation of a page that Servo built for a new window waits
+    /// until a tab holds the page ([`super::popup`]).
     fn request_navigation(&self, _: WebView, request: NavigationRequest) {
-        if navigable(request.url.as_str()) {
+        let allow = navigable(request.url.as_str());
+        let opening = &self.0.opening;
+        let allowed = opening.navigates(&request.url, allow, &self.0.open, Instant::now());
+        let Some(allowed) = allowed else {
+            opening.hold(request);
+            return;
+        };
+        if allowed {
             request.allow();
         } else {
             // The address is the page's text and may hold a whole
@@ -330,10 +377,23 @@ impl WebViewDelegate for Delegate {
         }
     }
 
-    /// A page opens no window: dropping the request refuses it, and
+    /// A page opens a new window as a tab once for each press of the user
+    /// in it ([`super::popup`]). Dropping any other request refuses it, and
     /// `window.open` answers `null`.
     fn request_create_new(&self, _: WebView, request: CreateNewWebViewRequest) {
-        self.0.log(false, |skipped| {
+        let state = &self.0;
+        let tab = !matches!(
+            state.open.source,
+            Source::Walkr(_) | Source::WalkrSession(_)
+        );
+        let grants = &state.open.mailbox.clipboard;
+        if tab && state.activation.admit(grants, Instant::now()) {
+            if let Err(error) = state.maker.popup(state, request) {
+                tracing::warn!(%error, "Cannot create the page of a page's new window");
+            }
+            return;
+        }
+        state.log(false, |skipped| {
             tracing::debug!(skipped, "Refused a page's new window");
         });
         drop(request);
@@ -429,6 +489,9 @@ struct Host {
     preview: Option<Rc<Preview>>,
     asked: Rc<Asked>,
     theme: String,
+    /// One set for all pages, as Servo keeps it.
+    keys: super::modifiers::HeldKeys,
+    maker: Rc<Maker>,
 }
 
 impl Host {
@@ -451,12 +514,19 @@ impl Host {
             .protocol_registry(registry)
             .build();
         servo.set_delegate(Rc::new(AppDelegate));
+        let maker = Rc::new(Maker {
+            servo: servo.clone(),
+            asked: asked.clone(),
+            built: RefCell::default(),
+        });
         Self {
             servo,
             pages: HashMap::new(),
             preview: None,
             asked,
             theme: String::new(),
+            keys: super::modifiers::HeldKeys::default(),
+            maker,
         }
     }
 
@@ -472,7 +542,7 @@ impl Host {
     }
 
     fn open(&mut self, open: Open) -> Result<(), Error> {
-        let key = open.key;
+        let (key, light) = (open.key, open.light);
         let url = url::Url::parse(&open.url).map_err(|_| Error::Address)?;
         let preview = self
             .preview()
@@ -481,50 +551,38 @@ impl Host {
             SoftwareRenderingContext::new(FIRST_SIZE)
                 .map_err(|error| Error::Surface(format!("{error:?}")))?,
         );
-        let scripts = Rc::new(UserContentManager::new(&self.servo));
-        scripts.add_script(Rc::new(UserScript::new(IPC.to_owned(), None)));
-        let probe = crate::browser::blank::PROBE.to_owned();
-        scripts.add_script(Rc::new(UserScript::new(probe, None)));
-        if open.bridge {
-            let bridge = crate::browser::annotate::BRIDGE.to_owned();
-            scripts.add_script(Rc::new(UserScript::new(bridge, None)));
-        }
-        let light = open.light;
-        let held = Held::new(open.mailbox.clone(), open.notifier.clone());
-        let state = Rc::new(State {
-            open,
-            preview,
-            asked: self.asked.clone(),
-            frame_ready: Cell::new(false),
-            shown: Cell::new(false),
-            scale: Cell::new(1.),
-            top: RefCell::new(None),
-            budget: RefCell::default(),
-            held,
+        let servo = &self.servo;
+        let opening = Opening::default();
+        let page = self.maker.page(open, preview, opening, context, |surface| {
+            WebViewBuilder::new(servo, surface).url(url)
         });
-        let view = WebViewBuilder::new(&self.servo, context.clone())
-            .delegate(Rc::new(Delegate(state.clone())))
-            .user_content_manager(scripts)
-            .url(url)
-            .build();
-        // Hidden until its window presents it.
-        view.hide();
         if let Some(light) = light {
-            view.notify_theme_change(theme(light));
+            page.view.notify_theme_change(theme(light));
         }
-        self.pages.insert(
-            key,
-            Page {
-                view,
-                context,
-                state,
-            },
-        );
+        self.pages.insert(key, page);
         Ok(())
+    }
+
+    /// Takes in the pages that Servo built for new windows as it last ran,
+    /// and closes each one that goes to no tab ([`super::popup`]).
+    fn take_popups(&mut self, now: Instant) {
+        let built = self.maker.built.take();
+        self.pages.extend(built);
+        let pages = self.pages.len();
+        self.pages
+            .retain(|_, page| !page.state.opening.ended(&page.state.open, now));
+        let closed = pages.saturating_sub(self.pages.len());
+        if closed > 0 {
+            tracing::debug!(closed, "Closed the page of a new window that no tab shows");
+        }
     }
 
     /// Applies one command. Returns whether the engine goes on.
     fn apply(&mut self, command: Command) -> bool {
+        // A new document gets none of the clipboard grants of the last one.
+        super::clipboard::before_command(&command, |key| {
+            self.pages.get(&key).map(|page| &*page.state.clipboard)
+        });
         match command {
             Command::Open(open) => {
                 let (source, reports) = (open.source, open.reports.clone());
@@ -534,23 +592,34 @@ impl Host {
                 }
             }
             // Dropping the last handle closes the view in Servo.
-            Command::Close(key) => drop(self.pages.remove(&key)),
+            Command::Close(key) => {
+                self.keys.close(key, keyed(&self.pages));
+                drop(self.pages.remove(&key));
+            }
             Command::Load(key, url) => {
                 if let (Some(page), Ok(url)) = (self.pages.get(&key), url::Url::parse(&url)) {
                     page.state.held.dismiss();
                     page.state.budget.borrow_mut().renew();
+                    page.state.probe.loaded(LoadStatus::Started);
                     page.view.load(url);
                 }
             }
             // Servo reports no start of a load for a reload it is asked
             // for, so the budget is renewed here, with the command.
-            Command::Reload(key) => self.asked_for(key, WebView::reload),
+            Command::Reload(key) => self.asked_for(key, |view| {
+                view.reload();
+                true
+            }),
+            // A step starts only where the view's history has an entry.
             Command::History(key, forward) => self.asked_for(key, |view| {
                 if forward && view.can_go_forward() {
                     view.go_forward(1);
                 } else if !forward && view.can_go_back() {
                     view.go_back(1);
+                } else {
+                    return false;
                 }
+                true
             }),
             Command::Sized(key) => {
                 if let Some(page) = self.pages.get(&key)
@@ -567,13 +636,17 @@ impl Host {
                     && let Some((x, y)) = page.state.open.latest.take_moved()
                 {
                     let point = WebViewPoint::Device(DevicePoint::new(x, y));
-                    page.view
-                        .notify_input_event(InputEvent::MouseMove(MouseMoveEvent::new(point)));
+                    let moved = InputEvent::MouseMove(MouseMoveEvent::new(point));
+                    self.keys.before(key, None, &moved, keyed(&self.pages));
+                    page.state.pointer.send(&page.view, moved);
                 }
             }
             Command::Shown(key, shown) => {
                 if let Some(page) = self.pages.get(&key) {
                     page.state.shown.set(shown);
+                    page.state.clipboard.shown(shown);
+                    // The pointer may rest on another place of it now.
+                    page.state.pointer.reset();
                     if shown {
                         page.view.show();
                         // What it drew while hidden was never handed over.
@@ -589,6 +662,7 @@ impl Host {
                     if !focused {
                         page.state.held.dismiss();
                     }
+                    page.state.clipboard.focused(focused);
                     page.view.set_focused(focused);
                 }
             }
@@ -597,13 +671,41 @@ impl Host {
                     page.state.held.answer(number, choice);
                 }
             }
+            Command::Pasted(key, number, text) => {
+                if let Some(page) = self.pages.get(&key) {
+                    page.state.clipboard.answer(number, text);
+                }
+            }
             Command::Zoom(key, zoom) => self.with(key, |view| view.set_page_zoom(zoom)),
             Command::Light(key, light) => {
                 self.with(key, |view| view.notify_theme_change(theme(light)));
             }
-            Command::Input(key, event) => self.with(key, |view| {
-                view.notify_input_event(*event);
-            }),
+            // Also the pointer's place the window sends ahead of a press.
+            Command::Input(key, input) => {
+                if let Some(page) = self.pages.get(&key) {
+                    let Input {
+                        activation,
+                        event,
+                        held,
+                        pressed,
+                    } = *input;
+                    // The keys held, just ahead of the event that has them.
+                    self.keys.before(key, held, &event, keyed(&self.pages));
+                    page.state.activation.pressed(activation);
+                    let id = page.state.pointer.send(&page.view, event);
+                    page.state.clipboard.input(pressed, id, Instant::now());
+                }
+            }
+            Command::Held(key, held) => {
+                if self.pages.contains_key(&key) {
+                    self.keys.settle(key, held, keyed(&self.pages));
+                }
+            }
+            Command::Adopted(key) => {
+                if let Some(page) = self.pages.get(&key) {
+                    page.state.opening.adopted(&page.state.open, Instant::now());
+                }
+            }
             Command::Script(key, script) => {
                 self.with(key, |view| view.evaluate_javascript(script, |_| {}));
             }
@@ -639,6 +741,13 @@ impl Host {
         tracing::info!("Cleared the cookies and site storage of browser tabs");
     }
 
+    /// Asks the pages whether their script thread ended, once one did
+    /// ([`super::stopped`]).
+    fn probe(&self) {
+        let pages = self.pages.values();
+        super::stopped::probe(pages.map(|page| (&page.view, &page.state.probe)));
+    }
+
     /// Gives the request `number` names the file the preview's worker read.
     fn answer(&self, number: u64, answer: Answer) {
         if let Some(load) = self.asked.take(number) {
@@ -654,12 +763,15 @@ impl Host {
 
     /// A load the user asks for: the tab gets its whole log budget again,
     /// so "reload and read the log" shows the page's lines however much it
-    /// wrote before. A load the page starts itself renews nothing.
-    fn asked_for(&self, key: PageKey, load: impl FnOnce(&WebView)) {
+    /// wrote before. A load the page starts itself renews nothing. `load`
+    /// tells whether it started one.
+    fn asked_for(&self, key: PageKey, load: impl FnOnce(&WebView) -> bool) {
         if let Some(page) = self.pages.get(&key) {
             page.state.held.dismiss();
             page.state.budget.borrow_mut().renew();
-            load(&page.view);
+            if load(&page.view) {
+                page.state.probe.loaded(LoadStatus::Started);
+            }
         }
     }
 
@@ -713,6 +825,16 @@ impl Host {
     }
 }
 
+/// Hands a page of `pages` the key events that Servo's set of held keys
+/// needs ([`super::modifiers`]).
+fn keyed(pages: &HashMap<PageKey, Page>) -> impl FnMut(PageKey, InputEvent) + '_ {
+    |key, event| {
+        if let Some(page) = pages.get(&key) {
+            page.state.pointer.send(&page.view, event);
+        }
+    }
+}
+
 fn theme(light: bool) -> Theme {
     if light { Theme::Light } else { Theme::Dark }
 }
@@ -755,7 +877,24 @@ pub(super) fn run(
     let mut host = Host::new(waker, answers);
     'engine: loop {
         let mut input = None;
+        // A clipboard read holds its page's script thread, and a page that
+        // Servo built for a new window waits for its tab: the loop wakes at
+        // the first deadline to fail the read or close the page, whatever
+        // its window does. No timer runs while nothing waits.
+        let expiry = host
+            .pages
+            .values()
+            .flat_map(|page| {
+                [
+                    page.state.clipboard.deadline(),
+                    page.state.opening.deadline(),
+                ]
+            })
+            .flatten()
+            .min()
+            .map_or_else(crossbeam_channel::never, crossbeam_channel::at);
         select! {
+            recv(expiry) -> _ => {},
             recv(answered) -> answer => {
                 if let Ok((number, answer)) = answer {
                     host.answer(number, answer);
@@ -779,6 +918,12 @@ pub(super) fn run(
                 }
             }
         }
+        let now = Instant::now();
+        for page in host.pages.values() {
+            page.state.clipboard.expire(now);
+        }
+        // Before Servo runs, which may navigate a page whose time is up.
+        host.take_popups(now);
         for (number, answer) in answered.try_iter().take(BATCH) {
             host.answer(number, answer);
         }
@@ -791,12 +936,16 @@ pub(super) fn run(
             host.apply(command);
         }
         host.servo.spin_event_loop();
+        host.take_popups(Instant::now());
+        host.probe();
         host.paint();
     }
     // The preview's worker may wait to hand an answer over: it stops waiting
     // once nothing reads them.
     drop(answered);
     // Servo's shutdown waits for its threads: here, never on the UI thread.
+    // A page built in the last run holds the maker that holds it.
+    drop(host.maker.built.take());
     host.pages.clear();
     drop(host);
 }

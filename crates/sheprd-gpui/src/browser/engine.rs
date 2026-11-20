@@ -23,21 +23,29 @@ use std::{
     path::PathBuf,
     sync::{
         Arc, Condvar, Mutex, OnceLock, PoisonError,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         mpsc::SyncSender,
     },
     task::{Poll, Waker},
     time::Duration,
 };
 
+pub(super) mod clipboard;
 mod console;
 pub(super) mod controls;
+mod cursor;
 mod error;
 mod host;
+#[cfg(test)]
+pub(super) mod inert;
 pub(super) mod keys;
+mod modifiers;
+pub(super) mod popup;
 pub(crate) mod profile;
+mod stopped;
 
 pub(crate) use error::Error;
+pub(crate) use popup::Popup;
 pub(crate) use profile::Cleared;
 
 /// Presses, keys, and wheel turns waiting for the engine. A full queue
@@ -65,6 +73,15 @@ const FORGET_WAIT: Duration = Duration::from_secs(5);
 /// Names one page to the engine, across every window.
 pub(super) type PageKey = u64;
 
+/// Pages are numbered across windows and the pages Servo builds for new
+/// windows, so a key never names two.
+static NEXT_PAGE: AtomicU64 = AtomicU64::new(0);
+
+/// A key that no page had before.
+pub(super) fn page_key() -> PageKey {
+    NEXT_PAGE.fetch_add(1, Ordering::Relaxed)
+}
+
 /// One drawn frame of a page: BGRA, as GPUI's images are, in device pixels.
 pub(super) struct Frame {
     pub(super) width: u32,
@@ -76,11 +93,19 @@ pub(super) struct Frame {
 
 /// The latest frame of one page. A newer frame replaces one the window has
 /// not taken yet, so a slow window never queues frames. With it, the list
-/// the page has open, if it has one.
+/// the page has open, if it has one, what it asked of the clipboard, and
+/// the pointer's shape over it.
 #[derive(Default)]
 pub(super) struct Mailbox {
+    pub(super) clipboard: clipboard::Waiting,
+    pub(super) cursor: cursor::Shape,
     frame: Mutex<Option<Frame>>,
     pub(super) list: controls::Listed,
+    /// Set once the engine ended the page that Servo built for a new window,
+    /// which no tab may hold from then on ([`popup`]).
+    pub(super) refused: stopped::Mark,
+    /// Set once the page's script thread is gone ([`stopped`]).
+    pub(super) stopped: stopped::Mark,
 }
 
 impl Mailbox {
@@ -200,6 +225,33 @@ pub(super) struct Open {
     pub(super) latest: Arc<Latest>,
 }
 
+/// A key, a press, or a move the user made in a page, with what the window
+/// put on it as it sent it. One command, so a full queue drops all of it or
+/// none.
+pub(super) struct Input {
+    /// The new window that a press lets the page open ([`popup`]).
+    pub(super) activation: Option<clipboard::Grant>,
+    pub(super) event: servo::InputEvent,
+    /// The modifier keys the user holds, which Servo's set is brought to
+    /// just before the event: only for the page that has the keyboard
+    /// ([`modifiers`]).
+    pub(super) held: Option<servo::Modifiers>,
+    /// The clipboard grant of a paste, copy, or cut key.
+    pub(super) pressed: Option<clipboard::Pressed>,
+}
+
+impl From<servo::InputEvent> for Input {
+    /// An event with nothing on it.
+    fn from(event: servo::InputEvent) -> Self {
+        Self {
+            activation: None,
+            event,
+            held: None,
+            pressed: None,
+        }
+    }
+}
+
 /// What a script answered, as JSON; runs on the engine's thread.
 pub(super) type Answered = Box<dyn FnOnce(String) + Send>;
 
@@ -218,13 +270,23 @@ pub(super) enum Command {
     Focused(PageKey, bool),
     Zoom(PageKey, f32),
     Light(PageKey, bool),
-    Input(PageKey, Box<servo::InputEvent>),
+    /// A key, a press, or a move, with what the window put on it.
+    Input(PageKey, Box<Input>),
+    /// The modifier keys the user holds now, as the page that has the
+    /// keyboard hears them change ([`modifiers`]).
+    Held(PageKey, servo::Modifiers),
+    /// A tab of the window holds the page that Servo built for a new
+    /// window: its first navigation may go on ([`popup::Popup`]).
+    Adopted(PageKey),
     /// One of the app's own scripts, with nothing to answer.
     Script(PageKey, String),
     Evaluate(PageKey, String, Answered),
     /// The window's answer to the page's list of that number
     /// ([`controls::Menu`]): the options chosen, or none when it was closed.
     Chosen(PageKey, u64, Option<Vec<usize>>),
+    /// The window's answer to the page's clipboard read of that number
+    /// ([`clipboard::Asks`]): the clipboard's text, or none to refuse it.
+    Pasted(PageKey, u64, Option<String>),
     /// Drop every site's cookies, site storage, and cached answers, and
     /// say so once done.
     Forget(SyncSender<()>),
@@ -237,7 +299,7 @@ impl Command {
     /// Whether this is what the pointer or the keys did in a page, which
     /// waits in the queue a burst may fill.
     fn is_input(&self) -> bool {
-        matches!(self, Self::Input(..) | Self::Moved(_))
+        matches!(self, Self::Input(..) | Self::Held(..) | Self::Moved(_))
     }
 }
 
@@ -359,6 +421,8 @@ impl Engine {
     pub(super) fn send(&self, command: Command) -> Result<(), Error> {
         // A test's engine has no thread to read a queue.
         if cfg!(test) {
+            #[cfg(test)]
+            inert::sent(&command);
             return Ok(());
         }
         let queue = if command.is_input() {
@@ -395,9 +459,11 @@ pub(crate) fn choose_tls_provider() {
 /// command; its future resolves when the engine's thread has finished, and
 /// GPUI gives every quit handler a short time together, so the UI thread
 /// never joins the engine. See [`finish`] for a shutdown slower than that.
-/// Also names the folder a clearing empties ([`DataFolder`]).
+/// Also names the folder a clearing empties ([`DataFolder`]), and has the
+/// crash hook contain the panics of Servo's script threads ([`stopped`]).
 pub(crate) fn install(cx: &mut gpui::App) {
     cx.set_global(DataFolder(profile::folder()));
+    stopped::install();
     cx.on_app_quit(|_| {
         let engine = Engine::started().filter(Engine::quit);
         async move {

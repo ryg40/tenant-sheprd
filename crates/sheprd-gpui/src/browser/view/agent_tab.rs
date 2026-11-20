@@ -30,8 +30,8 @@ impl SheprdWindow {
             store(cx).and_then(|store| store.opened_before(&scope, workspace, origin, location));
         let id = match before {
             Some(id) => {
-                #[cfg(embedded_pages)]
-                self.browser.pages.reload(id);
+                // A refusal shows as the tab's failure line.
+                let _ = self.reload_agent_page(id, window, cx);
                 id
             }
             None => {
@@ -69,14 +69,36 @@ impl SheprdWindow {
     }
 
     /// Reloads this window's pages for `tabs`, as an agent asks after
-    /// editing a page it showed.
-    pub(crate) fn reload_browser_tabs(&mut self, tabs: &[TabId]) {
+    /// editing a page it showed. How many of them stopped and could not
+    /// open again: each shows its failure line.
+    pub(crate) fn reload_browser_tabs(
+        &mut self,
+        tabs: &[TabId],
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> usize {
+        tabs.iter()
+            .filter(|id| self.reload_agent_page(**id, window, cx).is_err())
+            .count()
+    }
+
+    /// Reloads this window's page for tab `id`. A page that stopped opens
+    /// again, without choosing the tab; the error of an engine that
+    /// refused it.
+    fn reload_agent_page(
+        &mut self,
+        id: TabId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> crate::Result<()> {
+        let reopened = self.reopen_stopped(id, window, cx)?;
         #[cfg(embedded_pages)]
-        for id in tabs {
-            self.browser.pages.reload(*id);
+        if !reopened {
+            self.browser.pages.reload(id);
         }
         #[cfg(not(embedded_pages))]
-        let _ = tabs;
+        let _ = reopened;
+        Ok(())
     }
 
     /// Whether the window shows `workspace` of endpoint `index` now.

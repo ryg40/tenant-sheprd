@@ -47,7 +47,8 @@ pub(in crate::browser) struct Menu {
     /// Names this opening of a list for its page; later ones are greater.
     pub(in crate::browser) number: u64,
     /// The control's left, top, width, and height as Servo reports them:
-    /// CSS pixels of the control's own document.
+    /// device pixels of the page, after its zoom, its scroll, and the frames
+    /// around the control.
     pub(in crate::browser) control: [i32; 4],
     pub(in crate::browser) rows: Vec<Row>,
     /// The options chosen as the list opened.
